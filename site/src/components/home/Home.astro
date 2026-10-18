@@ -1,0 +1,249 @@
+---
+import HomeLayout from "../../layouts/HomeLayout.astro";
+import Shot from "./Shot.astro";
+import { HOME } from "../../i18n/home";
+import { ASSUME, DEFAULT_MONTHLY_BUDGET_USD, SCENARIOS, usd } from "../../lib/cost";
+import { href, REPO } from "../../lib/url";
+
+interface Props {
+	lang: "zh" | "en";
+}
+const { lang } = Astro.props;
+const t = HOME[lang];
+const d = (p: string) => href(`${lang === "en" ? "en/" : ""}docs/${p}/`);
+// 功能卡片很小：放大到截图里最有内容的一块
+const FOCUS: Record<string, { zoom: number; origin: string }> = {
+	timeline: { zoom: 1.45, origin: "78% 30%" },
+	viewer: { zoom: 1.15, origin: "50% 55%" },
+	organize: { zoom: 1.6, origin: "62% 22%" },
+	map: { zoom: 1.5, origin: "75% 45%" },
+	edit: { zoom: 1.1, origin: "50% 50%" },
+	stats: { zoom: 1.45, origin: "75% 20%" },
+};
+const fmtGb = (gb: number) => (gb >= 1000 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb)} GB`);
+---
+
+<HomeLayout t={t}>
+	<section class="hero">
+		<div class="dots" aria-hidden="true"></div>
+		<div class="wrap hero-in">
+			<p class="eyebrow">{t.hero.eyebrow}</p>
+			<h1>
+				<span>{t.hero.title[0]}</span>
+				<span class="accent">{t.hero.title[1]}</span>
+			</h1>
+			<p class="lead">{t.hero.lead}</p>
+			<div class="actions">
+				<a class="btn btn-primary" href={d("deploy/prepare")}>{t.hero.primary}</a>
+				<a class="btn" href={REPO}>{t.hero.secondary}</a>
+			</div>
+			<ul class="stack" aria-label="Cloudflare">
+				{t.hero.stack.map((s) => <li class="n-tag">{s}</li>)}
+			</ul>
+		</div>
+		<div class="wrap">
+			<div class="window">
+				<div class="window-bar" aria-hidden="true"><i></i><i></i><i></i><span>photos.example.com</span></div>
+				<Shot id="hero" lang={lang} alt={t.features.items[0].title} eager widths={[800, 1280, 1920]} sizes="(min-width: 1180px) 1120px, 100vw" mockNote={t.features.mockNote} />
+			</div>
+		</div>
+	</section>
+
+	<section class="wrap pillars">
+		{
+			t.pillars.map((p, i) => (
+				<article class="card pillar">
+					<span class="kicker">
+						<b>0{i + 1}</b> {p.kicker}
+					</span>
+					<h2>{p.title}</h2>
+					<p>{p.body}</p>
+				</article>
+			))
+		}
+	</section>
+
+	<section class="wrap section">
+		<header class="section-head">
+			<h2>{t.features.title}</h2>
+			<p>{t.features.lead}</p>
+		</header>
+		<div class="features">
+			{
+				t.features.items.map((f) => (
+					<article class="card feature">
+						<Shot id={f.id} lang={lang} alt={f.title} mockNote={t.features.mockNote} focus={FOCUS[f.id]} />
+						<div class="feature-text">
+							<h3>{f.title}</h3>
+							<p>{f.body}</p>
+						</div>
+					</article>
+				))
+			}
+		</div>
+		<p class="note center">{t.features.pwa}</p>
+	</section>
+
+	<section class="wrap section" id="cost">
+		<header class="section-head">
+			<span class="kicker">{t.cost.kicker}</span>
+			<h2>{t.cost.title}</h2>
+			<p>{t.cost.lead}</p>
+		</header>
+		<div class="cost">
+			<div class="cost-cards">
+				{
+					SCENARIOS.map((s) => (
+						<article class="card cost-card">
+							<div class="cost-photos">{t.cost.photos(s.photos)}</div>
+							<div class="cost-total">
+								<span class="num">{usd(s.monthly.total)}</span>
+								<span class="unit">{t.cost.perMonth}</span>
+							</div>
+							<dl>
+								<div>
+									<dt>{t.cost.head.storage}</dt>
+									<dd>{fmtGb(s.storageGb)}</dd>
+								</div>
+								<div>
+									<dt>{t.cost.head.plan}</dt>
+									<dd>{usd(s.monthly.plan)}</dd>
+								</div>
+								<div>
+									<dt>{t.cost.head.r2}</dt>
+									<dd>{usd(s.monthly.r2)}</dd>
+								</div>
+								<div>
+									<dt>{t.cost.head.vectorize}</dt>
+									<dd>{usd(s.monthly.vectorize)}</dd>
+								</div>
+								<div class="import">
+									<dt>{t.cost.head.import}</dt>
+									<dd>{usd(s.importCost)}</dd>
+								</div>
+							</dl>
+						</article>
+					))
+				}
+			</div>
+			<aside class="card guard">
+				<h3>{t.cost.guard.title}</h3>
+				<p>{t.cost.guard.body}</p>
+				<div class="meter" aria-hidden="true">
+					<div class="meter-fill"></div>
+					<div class="meter-cap"></div>
+				</div>
+			</aside>
+		</div>
+		<p class="note">{t.cost.capNote(DEFAULT_MONTHLY_BUDGET_USD)}</p>
+		<p class="note">{t.cost.assume(ASSUME.originalMb, ASSUME.derivedMb, ASSUME.containerSeconds)}</p>
+	</section>
+
+	<section class="wrap section split">
+		<div>
+			<span class="kicker">{t.device.kicker}</span>
+			<h2>{t.device.title}</h2>
+			<p class="lead-sm">{t.device.body}</p>
+			<ul class="checks">
+				{t.device.points.map((p) => <li>{p}</li>)}
+			</ul>
+			<a class="link" href={d("device/install")}>{t.device.cta} →</a>
+		</div>
+		<div class="card terminal" aria-hidden="true">
+			<div class="terminal-bar"><i></i><i></i><i></i></div>
+			<pre><code><span class="c">$</span> cd apps/device
+<span class="c">$</span> docker compose up -d --build
+<span class="m">✓ vips  ✓ exiftool  ✓ ffmpeg  ✓ models</span>
+<span class="m">→ http://localhost:7878</span>
+<span class="ok">● processing on this computer</span></code></pre>
+		</div>
+	</section>
+
+	<section class="wrap section">
+		<header class="section-head">
+			<span class="kicker">{t.privacy.kicker}</span>
+			<h2>{t.privacy.title}</h2>
+		</header>
+		<div class="privacy">
+			{
+				t.privacy.items.map((p) => (
+					<article class="privacy-item">
+						<h3>{p.title}</h3>
+						<p>{p.body}</p>
+					</article>
+				))
+			}
+		</div>
+	</section>
+
+	<section class="wrap section" id="deploy">
+		<header class="section-head">
+			<span class="kicker">{t.deploy.kicker}</span>
+			<h2>{t.deploy.title}</h2>
+		</header>
+		<ol class="steps">
+			{
+				t.deploy.steps.map((s, i) => (
+					<li class="card step">
+						<span class="step-n">{i + 1}</span>
+						<h3>{s.title}</h3>
+						<p>{s.body}</p>
+						<code>{s.code}</code>
+					</li>
+				))
+			}
+		</ol>
+		<p class="note center">{t.deploy.after}</p>
+		<p class="note center">{t.deploy.req}</p>
+		<div class="actions center">
+			<a class="btn btn-primary" href={d("deploy/prepare")}>{t.deploy.cta}</a>
+		</div>
+	</section>
+
+	<section class="wrap section">
+		<header class="section-head">
+			<h2>{t.compare.title}</h2>
+		</header>
+		<div class="table-wrap">
+			<table class="compare">
+				<thead>
+					<tr>
+						<th></th>
+						{t.compare.cols.map((c, i) => <th class={i === 0 ? "us" : ""}>{c}</th>)}
+					</tr>
+				</thead>
+				<tbody>
+					{
+						t.compare.rows.map((r) => (
+							<tr>
+								<th scope="row">{r.label}</th>
+								{r.cells.map((c, i) => (
+									<td class={i === 0 ? "us" : ""}>{c}</td>
+								))}
+							</tr>
+						))
+					}
+				</tbody>
+			</table>
+		</div>
+	</section>
+
+	<footer class="foot">
+		<div class="wrap foot-in">
+			<div class="brand">
+				<img src={href("favicon.svg")} alt="" width="24" height="24" />
+				<span>{lang === "en" ? "Nana" : "那时"}</span>
+			</div>
+			<nav>
+				<a href={d("introduction")}>{t.footer.links.docs}</a>
+				<a href={REPO}>{t.footer.links.github}</a>
+				<a href={`${REPO}/blob/main/CHANGELOG.md`}>{t.footer.links.changelog}</a>
+				<a href={`${REPO}/security/advisories/new`}>{t.footer.links.security}</a>
+			</nav>
+			<p>{t.footer.license}</p>
+			<p>
+				<a href={d("credits")}>{t.footer.credit}</a>
+			</p>
+		</div>
+	</footer>
+</HomeLayout>

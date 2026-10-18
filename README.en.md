@@ -1,6 +1,6 @@
 # Nana (那时)
 
-English · [简体中文](README.md)
+English · [简体中文](README.md) · [Website](https://darmau.github.io/nana-storage/en/) · [Docs](https://darmau.github.io/nana-storage/en/docs/introduction/)
 
 A private photo library, similar to Google Photos, that you deploy to your own Cloudflare account. It is built for exactly one user.
 

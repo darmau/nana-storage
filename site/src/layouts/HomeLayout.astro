@@ -1,0 +1,64 @@
+---
+// 首页外壳。不经过 Starlight，但主题偏好和文档共用（localStorage 的 starlight-theme）。
+import "../styles/tokens.css";
+import "../styles/home.css";
+import type { HomeMessages } from "../i18n/home";
+import { href, REPO } from "../lib/url";
+
+interface Props {
+	t: HomeMessages;
+}
+const { t } = Astro.props;
+const docs = href(t.lang === "en" ? "en/docs/introduction/" : "docs/introduction/");
+const deploy = href(t.lang === "en" ? "en/docs/deploy/prepare/" : "docs/deploy/prepare/");
+const canonical = new URL(Astro.url.pathname, Astro.site);
+---
+
+<!doctype html>
+<html lang={t.lang}>
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>{t.title}</title>
+		<meta name="description" content={t.description} />
+		<link rel="canonical" href={canonical} />
+		<link rel="alternate" hreflang="zh-CN" href={new URL(href(""), Astro.site)} />
+		<link rel="alternate" hreflang="en" href={new URL(href("en/"), Astro.site)} />
+		<link rel="icon" href={href("favicon.svg")} type="image/svg+xml" />
+		<meta property="og:title" content={t.title} />
+		<meta property="og:description" content={t.description} />
+		<meta property="og:type" content="website" />
+		<meta name="theme-color" content="#fafaf8" media="(prefers-color-scheme: light)" />
+		<meta name="theme-color" content="#0e0f11" media="(prefers-color-scheme: dark)" />
+		<script is:inline>
+			// 和 Starlight 的主题脚本同一个键：文档里选的浅色 / 深色，首页也跟着。
+			(() => {
+				let stored = null;
+				try {
+					stored = localStorage.getItem("starlight-theme");
+				} catch {}
+				const theme = stored || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+				document.documentElement.dataset.theme = theme === "light" ? "light" : "dark";
+			})();
+		</script>
+	</head>
+	<body>
+		<header class="top">
+			<div class="wrap top-in">
+				<a class="brand" href={href(t.lang === "en" ? "en/" : "")}>
+					<img src={href("favicon.svg")} alt="" width="28" height="28" />
+					<span>{t.lang === "en" ? "Nana" : "那时"}</span>
+				</a>
+				<nav class="top-nav">
+					<a href={docs}>{t.nav.docs}</a>
+					<a href={deploy} class="hide-sm">{t.nav.deploy}</a>
+					<a href={REPO} class="hide-sm">{t.nav.github}</a>
+					<a href={href(t.nav.switchHref)} lang={t.lang === "en" ? "zh-CN" : "en"} class="lang">{t.nav.switchLang}</a>
+				</nav>
+			</div>
+		</header>
+		<main>
+			<slot />
+		</main>
+	</body>
+</html>

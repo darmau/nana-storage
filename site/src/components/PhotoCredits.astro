@@ -1,0 +1,32 @@
+---
+// 示例照片的出处（site/scripts/demo-photos.json，pick-photos.mjs 生成）。
+import photos from "../../scripts/demo-photos.json";
+
+interface Props {
+	lang: "zh" | "en";
+}
+const { lang } = Astro.props;
+const byCreator = new Map<string, { landing: string; license: string }[]>();
+for (const p of photos) {
+	const key = p.creator ?? (lang === "zh" ? "佚名" : "Unknown");
+	byCreator.set(key, [...(byCreator.get(key) ?? []), { landing: p.landing, license: p.license }]);
+}
+const licenseName = (l: string) => (l === "cc0" ? "CC0 1.0" : l === "pdm" ? "Public Domain Mark" : l.toUpperCase());
+---
+
+<ul>
+	{
+		[...byCreator].sort((a, b) => a[0].localeCompare(b[0])).map(([creator, items]) => (
+			<li>
+				{creator}{lang === "zh" ? "：" : ": "}
+				{items.map((it, i) => (
+					<>
+						{i > 0 && ", "}
+						<a href={it.landing}>{`#${i + 1}`}</a>
+					</>
+				))}
+				{` (${licenseName(items[0].license)})`}
+			</li>
+		))
+	}
+</ul>

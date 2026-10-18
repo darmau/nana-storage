@@ -1,0 +1,27 @@
+---
+title: 致谢
+description: 用到的开源软件、模型、数据和示例照片。
+---
+
+import PhotoCredits from "../../../components/PhotoCredits.astro";
+
+## 软件和模型
+
+那时的代码以 [AGPL-3.0](https://github.com/darmau/nana-storage/blob/main/LICENSE) 开源。下面这些组件在构建时下载，各自遵循自己的许可证（完整列表见仓库的 [NOTICE](https://github.com/darmau/nana-storage/blob/main/NOTICE)）：
+
+- **InsightFace buffalo_l**（SCRFD 人脸检测、ArcFace 人脸识别），ONNX 版本由 Immich 导出。模型权重**只允许非商业研究用途**；可以用 `NANA_FACES=off` 完全不使用。
+- **OpenAI CLIP ViT-B/32** 图像编码器，int8 ONNX 版本由 Xenova 导出，MIT 许可。
+- **libvips、libheif、LibRaw、ExifTool、FFmpeg**：图片和视频处理。
+- **ONNX Runtime**：在容器里运行模型。
+- **Hono、React、TanStack、MapLibre GL**：Worker 和前端。
+- 本网站用 **Astro** 和 **Starlight** 构建。
+
+## 地图
+
+底图来自 [OpenFreeMap](https://openfreemap.org)，基于 OpenMapTiles 和 [OpenStreetMap](https://www.openstreetmap.org/copyright) 数据（© OpenStreetMap 贡献者，ODbL）。
+
+## 示例照片
+
+本网站截图里的照片都是 CC0 / 公有领域作品，来自 [StockSnap](https://stocksnap.io)，通过 [Openverse](https://openverse.org) 检索。拍摄时间和地点是为了演示设定的，不是真实的。感谢这些摄影师：
+
+<PhotoCredits lang="zh" />

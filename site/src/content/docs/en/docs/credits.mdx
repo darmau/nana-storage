@@ -1,0 +1,27 @@
+---
+title: Credits
+description: Open-source software, models, data and sample photos used.
+---
+
+import PhotoCredits from "../../../../components/PhotoCredits.astro";
+
+## Software and models
+
+Nana's code is open source under [AGPL-3.0](https://github.com/darmau/nana-storage/blob/main/LICENSE). The components below are downloaded at build time and keep their own licenses (full list in the repository's [NOTICE](https://github.com/darmau/nana-storage/blob/main/NOTICE)):
+
+- **InsightFace buffalo_l** (SCRFD face detection, ArcFace recognition), ONNX export by Immich. The model weights are for **non-commercial research only**; `NANA_FACES=off` leaves them out entirely.
+- **OpenAI CLIP ViT-B/32** image encoder, int8 ONNX export by Xenova, MIT License.
+- **libvips, libheif, LibRaw, ExifTool, FFmpeg** for images and video.
+- **ONNX Runtime** to run the models in the container.
+- **Hono, React, TanStack, MapLibre GL** for the Worker and frontend.
+- This website is built with **Astro** and **Starlight**.
+
+## Map
+
+Base map by [OpenFreeMap](https://openfreemap.org), based on OpenMapTiles and [OpenStreetMap](https://www.openstreetmap.org/copyright) data (© OpenStreetMap contributors, ODbL).
+
+## Sample photos
+
+The photos in this website's screenshots are CC0 / public domain works from [StockSnap](https://stocksnap.io), found through [Openverse](https://openverse.org). Their dates and places are made up for the demo. Thanks to these photographers:
+
+<PhotoCredits lang="en" />

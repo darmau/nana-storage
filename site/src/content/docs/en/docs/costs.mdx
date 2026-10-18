@@ -1,0 +1,47 @@
+---
+title: Costs
+description: What each item costs, typical totals, and how the cap works.
+---
+
+import CostTable from "../../../../components/CostTable.astro";
+
+Everything Nana costs is usage on your own Cloudflare account. No other services, no subscription.
+
+## Typical totals
+
+<CostTable lang="en" />
+
+- **Per month** is the steady monthly cost once everything is processed.
+- **One-time import** is what it costs if cloud containers process that many photos **within a single month** (after that month's free allowance). Spread the import over several months or use [on-device processing](../device/install/) and it can be close to zero.
+
+## What's billed
+
+| Item | How | Notes |
+|---|---|---|
+| Workers Paid | $5 / month | Fixed; required for Containers |
+| R2 storage | $0.015 per GB-month above 10 GB | Originals + thumbnails + previews + trash. R2 has no egress fees |
+| Containers | per vCPU-second, GiB-second of memory, GB-second of disk | Only while processing; stop after 30 s idle. Monthly free allowance included |
+| Vectorize | per stored vector dimension | One 512-d vector per photo and per face. Cents per month at 50,000 photos |
+| D1 | storage above 5 GB | Metadata is small; 50,000 photos are far below 5 GB |
+| Queues | ~3 operations per job | 1 million operations a month free |
+
+Requests, R2 operations and D1 rows read/written are also metered, but normal use stays within what Workers Paid includes. The in-app estimate leaves them out (they can't be computed accurately without an extra API token).
+
+## The monthly cap (circuit breaker)
+
+The app keeps its own books (`UsageGuard`):
+
+- After each job it records the actual container time and estimates this month's **container spend above the free allowance** (CPU counted at full load, so it only overestimates).
+- When that reaches the **monthly cap** ($10 by default; change it in Settings › Cost protection, $1–$500), the breaker trips: background processing and uploads pause, and you can still browse everything.
+- It also trips if a single photo is processed over and over within an hour (more than 6 automatic retries, or more than 30 runs in total), so one bad file can't retry forever.
+- After a trip, Settings shows why. Raise the cap or stop the offending jobs, then click Resume. See [Settings](../guide/settings/).
+
+The cap is **monthly**, per UTC calendar month, and resets automatically.
+
+## Estimate before upload
+
+When you pick a lot of photos, the upload panel estimates the batch's container cost from this month's average per job. If it would exceed the cap, or $1, it suggests on-device processing.
+
+## One more safety net
+
+Set budget alerts under Cloudflare dashboard › Billing (for example $20, $50, $100). Alerts notify without capping; they complement the in-app breaker. See [Options](../deploy/options/).

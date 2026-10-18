@@ -1,0 +1,60 @@
+/* Starlight 的颜色改成应用的那套（tokens.css）。Starlight 的默认是深色，浅色写在 [data-theme="light"] 上。 */
+:root {
+	--sl-color-white: #f2f3f0;
+	--sl-color-gray-1: #e4e5e1;
+	--sl-color-gray-2: #b9bdc4;
+	--sl-color-gray-3: #8a8f96;
+	--sl-color-gray-4: #4a4e55;
+	--sl-color-gray-5: #2a2d33;
+	--sl-color-gray-6: #17191c;
+	--sl-color-black: #0e0f11;
+	--sl-color-accent-low: #1c2740;
+	--sl-color-accent: #9dbbf5;
+	--sl-color-accent-high: #c4d6fa;
+	--sl-color-bg-nav: #0e0f11;
+	--sl-color-bg-sidebar: #0e0f11;
+	--sl-font: var(--n-sans);
+	--sl-font-mono: var(--n-mono);
+	--sl-content-width: 46rem;
+}
+
+:root[data-theme="light"] {
+	--sl-color-white: #17191c;
+	--sl-color-gray-1: #25282d;
+	--sl-color-gray-2: #3c4047;
+	--sl-color-gray-3: #5b6068;
+	--sl-color-gray-4: #8a8f96;
+	--sl-color-gray-5: #d6d8d3;
+	--sl-color-gray-6: #eeefec;
+	--sl-color-gray-7: #f5f5f2;
+	--sl-color-black: #fafaf8;
+	--sl-color-accent-low: #e3ebfb;
+	--sl-color-accent: #1f5fd6;
+	--sl-color-accent-high: #123f99;
+	--sl-color-bg-nav: #fafaf8;
+	--sl-color-bg-sidebar: #fafaf8;
+	--sl-color-hairline-light: #e2e3de;
+	--sl-color-hairline-shade: #e2e3de;
+}
+
+/* 顶栏半透明 + 细线，和首页一致 */
+.header {
+	background: color-mix(in srgb, var(--sl-color-bg-nav) 82%, transparent);
+	backdrop-filter: saturate(1.4) blur(12px);
+	border-bottom-color: var(--sl-color-hairline-light);
+}
+
+.sl-markdown-content :is(img, picture img) {
+	border-radius: 14px;
+	border: 1px solid var(--n-border);
+	box-shadow: var(--n-shadow);
+}
+
+.sl-markdown-content table {
+	font-size: var(--sl-text-sm);
+}
+
+.sl-markdown-content code:not(pre code) {
+	border-radius: 6px;
+	padding: 0.1em 0.35em;
+}

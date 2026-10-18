@@ -1,0 +1,59 @@
+# 官网和文档（site/）：PR 上只构建，上游 main 上构建并发布到 GitHub Pages。
+# 部署者的 fork 里不运行（!github.event.repository.fork），fork 不需要自己的官网。
+# 一次性配置：仓库 Settings → Pages → Source 选 “GitHub Actions”。
+# 上限：只在 site/ 或费用单价变化时触发，每次最多 10 分钟。
+name: Site
+
+on:
+  pull_request:
+    paths: ["site/**", "packages/shared/src/pricing.ts", "packages/shared/src/limits.ts"]
+  push:
+    branches: [main]
+    paths: ["site/**", "packages/shared/src/pricing.ts", "packages/shared/src/limits.ts", ".github/workflows/site.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: ${{ !github.event.repository.fork }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --ignore-workspace
+      - run: pnpm run check
+      - run: pnpm run build
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: site/dist
+
+  deploy:
+    if: ${{ !github.event.repository.fork && github.event_name != 'pull_request' }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

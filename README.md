@@ -1,6 +1,6 @@
 # 那时
 
-[English](README.en.md) · 简体中文
+[English](README.en.md) · 简体中文 · [官网](https://darmau.github.io/nana-storage/) · [使用文档](https://darmau.github.io/nana-storage/docs/introduction/)
 
 部署在自己 Cloudflare 账号上的私人相册，类似 Google Photos，只给一个人用。
 

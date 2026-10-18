@@ -1,0 +1,82 @@
+/*
+ * 颜色取自应用本身（apps/web/src/styles.css），官网和相册看起来是一家。
+ * Starlight 和首页共用：data-theme 由 Starlight 的主题脚本（或首页的同款脚本）写在 <html> 上，
+ * 没有脚本时（禁用 JS）跟随系统。
+ */
+:root {
+	--n-bg: #fafaf8;
+	--n-surface: #eeefec;
+	--n-surface-2: #e4e5e1;
+	--n-card: #ffffff;
+	--n-border: #e2e3de;
+	--n-fg: #17191c;
+	--n-muted: #5b6068;
+	--n-accent: #1f5fd6;
+	--n-accent-fg: #ffffff;
+	--n-accent-soft: #e3ebfb;
+	--n-accent-ink: #123f99;
+	--n-amber: #f2b544;
+	--n-amber-soft: #fbefd6;
+	--n-ok: #2f7a5b;
+	--n-dot: rgb(23 25 28 / 0.07);
+	--n-shadow: 0 1px 2px rgb(23 25 28 / 0.04), 0 8px 24px -8px rgb(23 25 28 / 0.12);
+	--n-shadow-lg: 0 2px 4px rgb(23 25 28 / 0.04), 0 24px 64px -24px rgb(23 25 28 / 0.28);
+	--n-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+	--n-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+		"Noto Sans CJK SC", Roboto, "Helvetica Neue", Arial, sans-serif;
+	color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--n-bg: #0e0f11;
+		--n-surface: #1b1d21;
+		--n-surface-2: #25282d;
+		--n-card: #17191c;
+		--n-border: #2a2d33;
+		--n-fg: #f2f3f0;
+		--n-muted: #a9aeb6;
+		--n-accent: #9dbbf5;
+		--n-accent-fg: #0e0f11;
+		--n-accent-soft: #1c2740;
+		--n-accent-ink: #c4d6fa;
+		--n-amber-soft: #33291a;
+		--n-ok: #7cc4a2;
+		--n-dot: rgb(242 243 240 / 0.07);
+		--n-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -8px rgb(0 0 0 / 0.5);
+		--n-shadow-lg: 0 2px 4px rgb(0 0 0 / 0.3), 0 24px 64px -24px rgb(0 0 0 / 0.7);
+		color-scheme: dark;
+	}
+}
+
+:root[data-theme="dark"] {
+	--n-bg: #0e0f11;
+	--n-surface: #1b1d21;
+	--n-surface-2: #25282d;
+	--n-card: #17191c;
+	--n-border: #2a2d33;
+	--n-fg: #f2f3f0;
+	--n-muted: #a9aeb6;
+	--n-accent: #9dbbf5;
+	--n-accent-fg: #0e0f11;
+	--n-accent-soft: #1c2740;
+	--n-accent-ink: #c4d6fa;
+	--n-amber-soft: #33291a;
+	--n-ok: #7cc4a2;
+	--n-dot: rgb(242 243 240 / 0.07);
+	--n-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -8px rgb(0 0 0 / 0.5);
+	--n-shadow-lg: 0 2px 4px rgb(0 0 0 / 0.3), 0 24px 64px -24px rgb(0 0 0 / 0.7);
+	color-scheme: dark;
+}
+
+/* 技术名词标签（首页和文档共用） */
+.n-tag {
+	display: inline-block;
+	font: 500 0.75rem/1.6 var(--n-mono);
+	padding: 0 0.5em;
+	border-radius: 6px;
+	border: 1px solid var(--n-border);
+	background: var(--n-card);
+	color: var(--n-muted);
+	white-space: nowrap;
+}

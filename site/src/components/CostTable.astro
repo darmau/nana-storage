@@ -1,0 +1,54 @@
+---
+// 文档里的费用表（和首页同一套计算，src/lib/cost.ts）。
+import { ASSUME, PRICING, SCENARIOS, usd } from "../lib/cost";
+
+interface Props {
+	lang: "zh" | "en";
+}
+const { lang } = Astro.props;
+const zh = lang === "zh";
+const n = (x: number) => x.toLocaleString(zh ? "zh-CN" : "en-US");
+const gb = (x: number) => (x >= 1000 ? `${(x / 1024).toFixed(1)} TB` : `${Math.round(x)} GB`);
+const C = PRICING.containers;
+---
+
+<table>
+	<thead>
+		<tr>
+			<th>{zh ? "照片数" : "Photos"}</th>
+			<th>{zh ? "存储" : "Storage"}</th>
+			<th>Workers Paid</th>
+			<th>{zh ? "R2 存储" : "R2 storage"}</th>
+			<th>Vectorize</th>
+			<th>{zh ? "每月合计" : "Per month"}</th>
+			<th>{zh ? "一次性导入" : "One-time import"}</th>
+		</tr>
+	</thead>
+	<tbody>
+		{
+			SCENARIOS.map((s) => (
+				<tr>
+					<td>{n(s.photos)}</td>
+					<td>{gb(s.storageGb)}</td>
+					<td>{usd(s.monthly.plan)}</td>
+					<td>{usd(s.monthly.r2)}</td>
+					<td>{usd(s.monthly.vectorize)}</td>
+					<td>
+						<strong>{usd(s.monthly.total)}</strong>
+					</td>
+					<td>
+						{usd(s.importCost)} {zh ? `（约 ${s.importHours.toFixed(1)} 容器小时）` : `(~${s.importHours.toFixed(1)} container-hours)`}
+					</td>
+				</tr>
+			))
+		}
+	</tbody>
+</table>
+
+<p>
+	{
+		zh
+			? `假设：每张原件 ${ASSUME.originalMb} MB，缩略图和预览 ${ASSUME.derivedMb} MB，每张 ${ASSUME.containerSeconds} 秒容器时间，每张 ${ASSUME.dimsPerPhoto} 个向量维度。容器规格 ${C.vcpu} vCPU / ${C.memoryGib} GiB 内存 / ${C.diskGb} GB 磁盘，CPU 按满载计（上限）。单价和免费额度来自 packages/shared/src/pricing.ts，以 Cloudflare 的定价页面和账单为准。`
+			: `Assumes ${ASSUME.originalMb} MB per original, ${ASSUME.derivedMb} MB of thumbnails and previews, ${ASSUME.containerSeconds} seconds of container time and ${ASSUME.dimsPerPhoto} vector dimensions per photo. Containers are ${C.vcpu} vCPU / ${C.memoryGib} GiB memory / ${C.diskGb} GB disk, with CPU counted at full load (an upper bound). Prices and free allowances come from packages/shared/src/pricing.ts; Cloudflare's pricing page and your bill are authoritative.`
+	}
+</p>

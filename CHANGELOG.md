@@ -6,6 +6,6 @@
 
 ## v0.1.0
 
-首个公开版本。部署步骤见 [docs/deploy.md](docs/deploy.md)。
+首个公开版本。部署步骤见 [docs/deploy.md](docs/deploy.md)，官网和使用文档：<https://darmau.github.io/nana-storage/>（源码在 `site/`，由 `.github/workflows/site.yml` 发布到 GitHub Pages，fork 里不运行）。
 
 - D1 的 `pin_lock` 表（迁移 `0009_pin_lock.sql`，PIN 锁已经去掉）这一版先保留，下一个版本删除，不需要操作。

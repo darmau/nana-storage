@@ -1,0 +1,79 @@
+---
+// CSS 画的示意图（没有截图时用）。“照片”是柔和的渐变色块，不含任何真实图片。
+interface Props {
+	kind: string;
+}
+const { kind } = Astro.props;
+
+// 天空、沙滩、森林、黄昏、湖水、石墙……像照片的配色
+const P = [
+	["#9cc3e6", "#e7eef2"],
+	["#e9c79a", "#f6e8d2"],
+	["#7da47f", "#c9dbc0"],
+	["#e59b7b", "#f3cfa6"],
+	["#6f9cb7", "#b9d3de"],
+	["#b7aea4", "#e2ddd6"],
+	["#d6a3b4", "#f0d9df"],
+	["#8fa6c9", "#d5dde9"],
+	["#c5b27d", "#ebe2c4"],
+	["#86b3ae", "#cfe3df"],
+];
+const tile = (i: number) => `background: linear-gradient(${(i * 47) % 180}deg, ${P[i % P.length][0]}, ${P[i % P.length][1]})`;
+const rows = [
+	[1.5, 0.75, 1.33, 1],
+	[1, 1.33, 0.75, 1.5, 1],
+	[1.33, 1.5, 1],
+];
+const faces = ["#e6b89c", "#c99878", "#f0cdb4", "#a87a5c", "#dcb08f", "#efc6a8"];
+---
+
+{
+	kind === "people" ? (
+		<div class="mock mock-people">
+			{faces.map((c, i) => (
+				<div class="mock-person">
+					<div class="mock-face" style={`background: radial-gradient(circle at 50% 38%, ${c} 0 28%, ${P[(i + 3) % P.length][0]} 29% 100%)`} />
+					<div class="mock-line" style={`width:${40 + ((i * 13) % 30)}%`} />
+				</div>
+			))}
+		</div>
+	) : kind === "similar" ? (
+		<div class="mock mock-similar">
+			{[0, 1, 2].map((i) => (
+				<div class="mock-stack" style={`${tile(i + 2)}; transform: translateX(${i * 18}%) rotate(${(i - 1) * 4}deg)`} />
+			))}
+			<div class="mock-badge">0.97</div>
+		</div>
+	) : kind === "map" ? (
+		<div class="mock mock-map">
+			<svg viewBox="0 0 400 260" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+				<path d="M0 170 C80 140 120 190 200 160 S330 110 400 140 V260 H0Z" class="map-land" />
+				<path d="M0 90 C70 60 150 110 230 80 S350 40 400 60" class="map-road" />
+				<path d="M40 260 C90 200 160 210 190 120 S260 40 300 0" class="map-road" />
+				{[
+					[110, 120, 24],
+					[230, 150, 36],
+					[300, 80, 14],
+					[160, 200, 9],
+				].map(([x, y, n]) => (
+					<g>
+						<circle cx={x} cy={y} r={14 + n / 4} class="map-pin" />
+						<text x={x} y={y + 4} text-anchor="middle" class="map-n">
+							{n}
+						</text>
+					</g>
+				))}
+			</svg>
+		</div>
+	) : (
+		<div class="mock mock-grid">
+			{rows.map((r, ri) => (
+				<div class="mock-row">
+					{r.map((ar, i) => (
+						<div class="mock-tile" style={`flex: ${ar}; ${tile(ri * 5 + i)}`} />
+					))}
+				</div>
+			))}
+		</div>
+	)
+}
