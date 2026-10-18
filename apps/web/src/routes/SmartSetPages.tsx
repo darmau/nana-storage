@@ -4,14 +4,14 @@ import { ASSET_TYPES, type AssetType, SMART_SET_CV_MIN, SMART_SET_SENSITIVITY, t
 import { useState } from "react";
 import { api, errorText } from "../api";
 import { fmtNumber, t } from "../i18n";
-import { invalidateLibrary, refreshSmartSet } from "../library/actions";
+import { invalidateLibrary, refreshSmartSet, setSmartSetFolders } from "../library/actions";
 import { LibraryList } from "../library/LibraryList";
-import { AlbumPicker } from "../library/Pickers";
+import { AlbumPicker, FolderScopePicker } from "../library/Pickers";
 import { type ListSource, type SmartSetDetail, type SmartSetSummary, albumsQuery, smartSetsQuery } from "../library/queries";
 import { TypeFilter, useTypeFilter } from "../library/TypeFilter";
 import { alertDialog, confirmDialog, promptDialog } from "../ui/confirm";
 import { openContextMenu } from "../ui/ContextMenu";
-import { IconAlert, IconChart, IconChevronRight, IconClose, IconEdit, IconSimilar, IconTrash } from "../ui/icons";
+import { IconAlert, IconChart, IconChevronRight, IconClose, IconEdit, IconFolder, IconSimilar, IconTrash } from "../ui/icons";
 import { useDocumentTitle } from "../ui/title";
 import { Cover, PageActions } from "./LibraryPages";
 import { SmartSetReview } from "./SmartSetReview";
@@ -46,8 +46,8 @@ export function SmartSetsPage() {
 	);
 }
 
-/** 卡片下面的一行：结果张数（“标准”灵敏度）和样本数。 */
-export const smartSetLine = (s: SmartSetSummary) => t.topics.cardLine(s.positives + s.matches, s.positives + s.negatives);
+/** 卡片下面的一行：结果张数（“标准”灵敏度，指定了范围时只算范围里的）和样本数。 */
+export const smartSetLine = (s: SmartSetSummary) => t.topics.cardLine(s.in_scope + s.matches, s.positives + s.negatives);
 
 export function SmartSetGrid({ sets }: { sets: SmartSetSummary[] | undefined }) {
 	const qc = useQueryClient();
@@ -145,7 +145,9 @@ export function SmartSetPage() {
 	const info = useQuery({ queryKey: ["smart-sets", setId], queryFn: () => api<SmartSetDetail>(`/smart-sets/${setId}`) });
 	useDocumentTitle(info.data?.name);
 	const refresh = useMutation({ mutationFn: () => refreshSmartSet(qc, setId) });
+	const rescope = useMutation({ mutationFn: (folders: string[]) => setSmartSetFolders(qc, setId, folders) });
 	const [reviewing, setReviewing] = useState(false);
+	const [scoping, setScoping] = useState(false);
 	const act = async (fn: () => Promise<unknown>) => {
 		try {
 			await fn();
@@ -157,11 +159,11 @@ export function SmartSetPage() {
 
 	if (info.error) return <p className="text-danger">{errorText(info.error)}</p>;
 	const d = info.data;
-	const busy = refresh.isPending || !!d?.refreshing;
+	const busy = refresh.isPending || rescope.isPending || !!d?.refreshing;
 	const tabs: { key: typeof view; label: string; n?: number; search: SmartSetSearch }[] = [
 		{ key: "samples", label: t.topics.samples, n: d && d.positives + d.negatives, search: {} },
 		{ key: "review", label: t.topics.review, n: d?.suggestions.loose, search: { tab: "review" } },
-		{ key: "results", label: t.topics.results, n: d && d.positives + d.suggestions.normal, search: { tab: "results" } },
+		{ key: "results", label: t.topics.results, n: d && d.in_scope + d.suggestions.normal, search: { tab: "results" } },
 	];
 	return (
 		<div className="space-y-5">
@@ -189,6 +191,26 @@ export function SmartSetPage() {
 					/>
 				)}
 			</div>
+			{d && (
+				<div className="flex flex-wrap items-center gap-2 text-sm">
+					<IconFolder size={18} className="shrink-0 text-muted" />
+					<span className="text-muted">{t.topics.scope}</span>
+					{d.folders ? (
+						d.folders.map((f) => (
+							<Link key={f.id} to="/folders/$folderId" params={{ folderId: f.id }} className="max-w-48 truncate font-medium hover:underline">
+								{f.name}
+							</Link>
+						))
+					) : (
+						<span className="font-medium">{t.topics.scopeAll}</span>
+					)}
+					<button className={chip(false)} disabled={busy} onClick={() => setScoping(true)}>
+						{rescope.isPending ? t.topics.scopeSaving : t.topics.scopeEdit}
+					</button>
+				</div>
+			)}
+			{rescope.error && <p className="text-sm text-danger">{errorText(rescope.error)}</p>}
+			{rescope.data?.suggestions != null && !rescope.isPending && <p className="text-sm text-muted">{t.topics.refreshed(rescope.data.suggestions)}</p>}
 			{d?.dirty && (
 				<div className="flex flex-wrap items-center gap-3 rounded-2xl bg-notice px-4 py-3 text-sm">
 					<IconSimilar size={18} className="shrink-0 text-muted" />
@@ -225,6 +247,16 @@ export function SmartSetPage() {
 				<ReviewTab setId={setId} d={d} order={search.order} onReview={() => setReviewing(true)} />
 			) : (
 				<ResultsTab setId={setId} d={d} search={search} />
+			)}
+			{scoping && d && (
+				<FolderScopePicker
+					initial={d.folders ?? []}
+					onClose={() => setScoping(false)}
+					onSave={(folders) => {
+						setScoping(false);
+						rescope.mutate(folders);
+					}}
+				/>
 			)}
 			{reviewing && d && (
 				<SmartSetReview
@@ -441,7 +473,7 @@ function ResultsTab({ setId, d, search }: { setId: string; d: SmartSetDetail | u
 								className={chip(level === l.key)}
 							>
 								{l.label}
-								{count(d && d.positives + d.suggestions[l.key])}
+								{count(d && d.in_scope + d.suggestions[l.key])}
 							</Link>
 						))}
 					</div>

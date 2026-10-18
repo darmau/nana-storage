@@ -206,6 +206,11 @@ export const SMART_SET_CV_FOLDS = 5;
 /** 建议页的灵敏度：严格 / 标准 / 宽松 对应的最低分数。 */
 export const SMART_SET_SENSITIVITY = { strict: 0.8, normal: 0.5, loose: SMART_SET_SUGGEST_FLOOR } as const;
 export const SMART_SET_SCAN_PAGE = 1000;
+/**
+ * 主题的范围最多指定这么多个文件夹（含子文件夹）。指定了范围时，更新只给范围里的照片打分（读取量不变，
+ * 写入的建议更少），新照片也只在范围里才打分；改范围时立即更新一次（和新建主题一样，只由用户操作触发）。
+ */
+export const SMART_SET_MAX_FOLDERS = 50;
 export const SMART_SET_REFRESH_LOCK_MS = 60_000;
 
 /**

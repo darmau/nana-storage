@@ -21,6 +21,7 @@ import {
 	SMART_SET_CV_MIN,
 	SMART_SET_MAX,
 	SMART_SET_MAX_EXAMPLES,
+	SMART_SET_MAX_FOLDERS,
 	SMART_SET_REFRESH_LOCK_MS,
 	SMART_SET_SCAN_PAGE,
 	SMART_SET_SENSITIVITY,
@@ -287,13 +288,29 @@ export async function deleteVectors(env: Env, ids: string[]) {
 	}
 }
 
-/** 新照片处理完：用每个训练过的主题（最多 SMART_SET_MAX 个）打一次分，够像的进“建议”。不读全库，不调用 Vectorize。 */
+/**
+ * 新照片处理完：用每个训练过的主题（最多 SMART_SET_MAX 个）打一次分，够像的进“建议”。不读全库，不调用 Vectorize。
+ * 指定了范围的主题只在照片位于范围里（某个范围文件夹是它的文件夹或上级）时打分。
+ */
 async function scoreForSmartSets(env: Env, assetId: string, embedding: Int8Array) {
-	const { results } = await env.DB.prepare("SELECT id, weights FROM smart_sets WHERE weights IS NOT NULL LIMIT ?")
+	const { results } = await env.DB.prepare("SELECT id, weights, folders FROM smart_sets WHERE weights IS NOT NULL LIMIT ?")
 		.bind(SMART_SET_MAX)
-		.all<{ id: string; weights: ArrayBuffer }>();
+		.all<{ id: string; weights: ArrayBuffer; folders: string | null }>();
+	let ancestors: Set<string> | null = null;
+	if (results.some((s) => s.folders !== null)) {
+		const { results: up } = await env.DB.prepare(
+			`WITH RECURSIVE up(id) AS (
+			   SELECT folder_id FROM assets WHERE id = ? AND folder_id IS NOT NULL
+			   UNION SELECT f.parent_id FROM folders f JOIN up ON f.id = up.id WHERE f.parent_id IS NOT NULL)
+			 SELECT id FROM up`,
+		)
+			.bind(assetId)
+			.all<{ id: string }>();
+		ancestors = new Set(up.map((r) => r.id));
+	}
 	const hits: { id: string; score: number }[] = [];
 	for (const s of results) {
+		if (s.folders !== null && !parseFolders(s.folders).some((f) => ancestors?.has(f))) continue;
 		const c = decodeClassifier(s.weights);
 		const p = c ? score(c, embedding) : 0;
 		if (p >= SMART_SET_SUGGEST_FLOOR) hits.push({ id: s.id, score: p });
@@ -775,6 +792,43 @@ async function classifierOf(env: Env, setId: string): Promise<Classifier | null>
 	return row?.weights ? decodeClassifier(row.weights) : null;
 }
 
+/** smart_sets.folders 的 JSON 文本 → 范围的根文件夹 id。 */
+function parseFolders(json: string): string[] {
+	try {
+		const v: unknown = JSON.parse(json);
+		return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * 主题的范围展开成整棵子树的文件夹 id（JSON 文本，交给 json_each）；null 表示整个资料库。
+ * 范围在每次读取时展开，所以之后新建的子文件夹、移进来的文件夹都算在内；删掉的文件夹自然不在了。
+ * 文件夹表很小（几百到几千行），递归 CTE 不和条目相关，只跑一次。
+ */
+const scopeStmt = (env: Env, folders: string) =>
+	env.DB.prepare(
+		`WITH RECURSIVE t(id) AS (
+		   SELECT id FROM folders WHERE id IN (SELECT value FROM json_each(?))
+		   UNION SELECT f.id FROM folders f JOIN t ON f.parent_id = t.id)
+		 SELECT id FROM t`,
+	).bind(folders);
+const scopeJson = (rows: { id: string }[]) => JSON.stringify(rows.map((r) => r.id));
+
+async function scopeOf(env: Env, folders: string | null): Promise<string | null> {
+	if (folders === null) return null;
+	return scopeJson((await scopeStmt(env, folders).all<{ id: string }>()).results);
+}
+
+async function scopeOfSet(env: Env, setId: string): Promise<string | null> {
+	const row = await env.DB.prepare("SELECT folders FROM smart_sets WHERE id = ?").bind(setId).first<{ folders: string | null }>();
+	return scopeOf(env, row?.folders ?? null);
+}
+
+/** 范围条件：参数是 scopeOf() 的结果，为 null 时不加条件。 */
+const IN_SCOPE = (param: string) => ` AND a.folder_id IN (SELECT value FROM json_each(${param}))`;
+
 /** 背景样本：随机的几段 rowid（每段 SMART_SET_BACKGROUND / BACKGROUND_RUNS 行），只读这么多行，不扫描全表。 */
 async function backgroundSample(env: Env, exclude: Set<string>): Promise<Float32Array[]> {
 	const max = await env.DB.prepare("SELECT MAX(rowid) AS m FROM asset_fp").first<{ m: number | null }>();
@@ -858,6 +912,8 @@ export async function refreshSmartSet(env: Env, setId: string): Promise<{ sugges
 			.bind(FP_MODEL_VER, setId, SMART_SET_MAX_EXAMPLES)
 			.all<{ asset_id: string; label: number; embedding: ArrayBuffer | null }>();
 		const exampleIds = new Set(examples.map((e) => e.asset_id));
+		// 范围只影响扫描哪些照片；样本不论在哪个文件夹都用来训练，背景仍从全库抽
+		const scope = await scopeOfSet(env, setId);
 		const pos: { id: string; v: Float32Array }[] = [];
 		const neg: { id: string; v: Float32Array }[] = [];
 		for (const e of examples) {
@@ -883,9 +939,9 @@ export async function refreshSmartSet(env: Env, setId: string): Promise<{ sugges
 		while (model) {
 			const { results } = await env.DB.prepare(
 				`SELECT f.asset_id, f.embedding FROM asset_fp f JOIN assets a ON a.id = f.asset_id
-				 WHERE f.model = ? AND f.asset_id > ? AND ${VISIBLE} ORDER BY f.asset_id LIMIT ?`,
+				 WHERE f.model = ? AND f.asset_id > ? AND ${VISIBLE}${scope === null ? "" : IN_SCOPE("?")} ORDER BY f.asset_id LIMIT ?`,
 			)
-				.bind(FP_MODEL_VER, after, SMART_SET_SCAN_PAGE)
+				.bind(FP_MODEL_VER, after, ...(scope === null ? [] : [scope]), SMART_SET_SCAN_PAGE)
 				.all<{ asset_id: string; embedding: ArrayBuffer }>();
 			for (const r of results) {
 				if (exampleIds.has(r.asset_id)) continue;
@@ -926,6 +982,7 @@ export async function refreshSmartSet(env: Env, setId: string): Promise<{ sugges
 				negatives: neg.length,
 				cv: !!cv,
 				suggestions: hits.length,
+				scoped: scope !== null,
 				ms: Date.now() - started,
 			}),
 		);
@@ -965,7 +1022,7 @@ export async function refreshStaleSmartSets(env: Env): Promise<number> {
 	return done;
 }
 
-const SET_COLUMNS = `s.id, s.name, s.updated_at, s.trained_at,
+const SET_COLUMNS = `s.id, s.name, s.updated_at, s.trained_at, s.folders,
 	(s.trained_at IS NULL OR s.labels_changed_at > s.trained_at) AS dirty,
 	(s.refreshing_until IS NOT NULL AND s.refreshing_until > ?1) AS refreshing,
 	(SELECT COUNT(*) FROM smart_set_examples e JOIN assets a ON a.id = e.asset_id WHERE e.set_id = s.id AND e.label = 1 AND ${VISIBLE}) AS positives,
@@ -982,8 +1039,30 @@ similar.get("/smart-sets", async (c) => {
 		 FROM smart_sets s ORDER BY s.name`,
 	)
 		.bind(Date.now(), SMART_SET_SENSITIVITY.normal)
-		.all();
-	const items = results.map(withFlags);
+		.all<Record<string, unknown> & { id: string; folders: string | null; positives: number }>();
+	// 指定了范围的主题：结果只算范围里的正例和建议（建议在更新时只扫范围里的，之后移出去的照片在这里去掉）
+	const scoped = results.filter((s) => s.folders !== null);
+	const scopes = scoped.length
+		? (await c.env.DB.batch<{ id: string }>(scoped.map((s) => scopeStmt(c.env, s.folders!)))).map((r) => scopeJson(r.results))
+		: [];
+	const counts = scoped.length
+		? await c.env.DB.batch<{ in_scope: number; matches: number }>(
+				scoped.map((s, i) =>
+					c.env.DB.prepare(
+						`SELECT
+							(SELECT COUNT(*) FROM smart_set_examples e JOIN assets a ON a.id = e.asset_id
+							 WHERE e.set_id = ?1 AND e.label = 1 AND ${VISIBLE}${IN_SCOPE("?3")}) AS in_scope,
+							(SELECT COUNT(*) FROM smart_set_suggestions g JOIN assets a ON a.id = g.asset_id
+							 WHERE g.set_id = ?1 AND g.score >= ?2 AND ${VISIBLE}${IN_SCOPE("?3")}) AS matches`,
+					).bind(s.id, SMART_SET_SENSITIVITY.normal, scopes[i]),
+				),
+			)
+		: [];
+	const byId = new Map(scoped.map((s, i) => [s.id, counts[i]!.results[0]!]));
+	const items = results.map((r) => {
+		const { folders, ...rest } = r;
+		return { ...withFlags(rest), scoped: folders !== null, in_scope: r.positives, ...byId.get(r.id) };
+	});
 	if (items.some((s) => s.refreshing)) c.header("Cache-Control", NO_STORE); // 锁过期不写库，这时的结果不能带 ETag
 	return c.json({ items, next: null });
 });
@@ -1010,7 +1089,9 @@ similar.post("/smart-sets", async (c) => {
  *  - suggestions：每档灵敏度的建议数（结果 = positives + 这个数）；
  *  - conflicts：标签和分类器矛盾的样本数；changed：上次训练之后新标的（或改了标签的）样本数；
  *  - metrics：上次训练的质量指标（SmartSetMetrics），没训练过时为 null；
- *  - reviewed：每档灵敏度下，标记时正好在建议里、分数达到这一档的样本数（n）和其中标成正例的（yes），即实测准确率。
+ *  - reviewed：每档灵敏度下，标记时正好在建议里、分数达到这一档的样本数（n）和其中标成正例的（yes），即实测准确率；
+ *  - folders：范围的根文件夹（还存在的），null 表示整个资料库；in_scope：范围里的正例数（结果 = in_scope + 建议），
+ *    建议数也只算范围里的。
  */
 similar.get("/smart-sets/:id", async (c) => {
 	const id = c.req.param("id");
@@ -1022,40 +1103,80 @@ similar.get("/smart-sets/:id", async (c) => {
 		 FROM smart_sets s WHERE s.id = ?2`,
 	)
 		.bind(Date.now(), id)
-		.first<Record<string, unknown> & { metrics: string | null }>();
+		.first<Record<string, unknown> & { metrics: string | null; folders: string | null; positives: number }>();
 	if (!row) return c.json({ error: "not found" }, 404);
-	const [levels, reviewed] = await c.env.DB.batch<Record<string, number | null>>([
+	const scope = await scopeOf(c.env, row.folders);
+	const scopeSql = scope === null ? "" : IN_SCOPE("?5");
+	const scopeBind = scope === null ? [] : [scope];
+	const [levels, reviewed, inScope, folders] = await c.env.DB.batch<Record<string, number | string | null>>([
 		c.env.DB.prepare(
 			`SELECT SUM(g.score >= ?2) AS strict, SUM(g.score >= ?3) AS normal, SUM(g.score >= ?4) AS loose
-			 FROM smart_set_suggestions g JOIN assets a ON a.id = g.asset_id WHERE g.set_id = ?1 AND ${VISIBLE}`,
-		).bind(id, strict, normal, loose),
+			 FROM smart_set_suggestions g JOIN assets a ON a.id = g.asset_id WHERE g.set_id = ?1 AND ${VISIBLE}${scopeSql}`,
+		).bind(id, strict, normal, loose, ...scopeBind),
 		c.env.DB.prepare(
 			`SELECT SUM(e.review_score >= ?2) AS strict_n, SUM(e.review_score >= ?2 AND e.label = 1) AS strict_yes,
 				SUM(e.review_score >= ?3) AS normal_n, SUM(e.review_score >= ?3 AND e.label = 1) AS normal_yes,
 				SUM(e.review_score >= ?4) AS loose_n, SUM(e.review_score >= ?4 AND e.label = 1) AS loose_yes
 			 FROM smart_set_examples e JOIN assets a ON a.id = e.asset_id WHERE e.set_id = ?1 AND e.review_score IS NOT NULL AND ${VISIBLE}`,
 		).bind(id, strict, normal, loose),
+		scope === null
+			? c.env.DB.prepare("SELECT ? AS n").bind(row.positives)
+			: c.env.DB.prepare(
+					`SELECT COUNT(*) AS n FROM smart_set_examples e JOIN assets a ON a.id = e.asset_id
+					 WHERE e.set_id = ?1 AND e.label = 1 AND ${VISIBLE}${IN_SCOPE("?2")}`,
+				).bind(id, scope),
+		c.env.DB.prepare("SELECT f.id, f.name FROM json_each(?) j JOIN folders f ON f.id = j.value ORDER BY f.name, f.id").bind(row.folders ?? "[]"),
 	]);
 	const l = levels!.results[0] ?? {};
 	const r = reviewed!.results[0] ?? {};
-	const { metrics, ...rest } = row;
+	const { metrics, folders: _folders, ...rest } = row;
 	const set = withFlags(rest);
 	if (set.refreshing) c.header("Cache-Control", NO_STORE);
 	return c.json({
 		...set,
+		scoped: row.folders !== null,
+		in_scope: inScope!.results[0]?.n ?? 0,
+		folders: row.folders === null ? null : folders!.results,
 		metrics: metrics ? (JSON.parse(metrics) as SmartSetMetrics) : null,
 		suggestions: Object.fromEntries(LEVELS.map((k) => [k, l[k] ?? 0])),
 		reviewed: Object.fromEntries(LEVELS.map((k) => [k, { n: r[`${k}_n`] ?? 0, yes: r[`${k}_yes`] ?? 0 }])),
 	});
 });
 
+/**
+ * 改名，或者改范围（folders：文件夹 id，含子文件夹；null 或空数组表示整个资料库）。
+ * 改范围时只保留还存在的文件夹，然后立即更新一次（和新建主题一样）；正在更新的话标记为需要更新，由用户或 Cron 再跑。
+ */
 similar.patch("/smart-sets/:id", async (c) => {
-	const body = z.object({ name: Name }).parse(await c.req.json());
-	const res = await c.env.DB.prepare("UPDATE smart_sets SET name = ?, updated_at = ? WHERE id = ? RETURNING id")
-		.bind(body.name, Date.now(), c.req.param("id"))
-		.first();
+	const body = z
+		.object({ name: Name.optional(), folders: z.array(ID).max(SMART_SET_MAX_FOLDERS).nullable().optional() })
+		.refine((b) => b.name !== undefined || b.folders !== undefined)
+		.parse(await c.req.json());
+	const id = c.req.param("id");
+	const now = Date.now();
+	let folders: string | null | undefined;
+	if (body.folders !== undefined) {
+		const { results } = body.folders?.length
+			? await c.env.DB.prepare("SELECT id FROM folders WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id")
+					.bind(JSON.stringify(body.folders))
+					.all<{ id: string }>()
+			: { results: [] };
+		if (body.folders?.length && !results.length) return c.json({ error: "folder not found" }, 404);
+		folders = results.length ? JSON.stringify(results.map((r) => r.id)) : null;
+	}
+	const res = await c.env.DB.prepare(
+		`UPDATE smart_sets SET name = COALESCE(?1, name),
+		   folders = CASE WHEN ?2 THEN ?3 ELSE folders END,
+		   labels_changed_at = CASE WHEN ?2 AND folders IS NOT ?3 THEN ?4 ELSE labels_changed_at END,
+		   updated_at = ?4
+		 WHERE id = ?5 RETURNING (labels_changed_at = ?4) AS rescoped`,
+	)
+		.bind(body.name ?? null, folders !== undefined ? 1 : 0, folders ?? null, now, id)
+		.first<{ rescoped: number }>();
 	if (!res) return c.json({ error: "not found" }, 404);
-	return c.json({ ok: true });
+	if (!res.rescoped) return c.json({ ok: true });
+	const r = await refreshSmartSet(c.env, id);
+	return c.json({ ok: true, suggestions: r && r !== "busy" ? r.suggestions : null });
 });
 
 similar.delete("/smart-sets/:id", async (c) => {
@@ -1181,11 +1302,12 @@ similar.get("/smart-sets/:id/suggestions", async (c) => {
 	const offset = Offset(c);
 	const min = MinScore(c.req.query("min"), SMART_SET_SUGGEST_FLOOR);
 	const order = c.req.query("order") === "uncertain" ? `ABS(g.score - ${SMART_SET_SENSITIVITY.normal}), a.id` : "g.score DESC, a.id";
+	const scope = await scopeOfSet(c.env, c.req.param("id"));
 	const { results } = await c.env.DB.prepare(
 		`SELECT ${ITEM_COLUMNS}, g.score FROM smart_set_suggestions g JOIN assets a ON a.id = g.asset_id
-		 WHERE g.set_id = ? AND g.score >= ? AND ${VISIBLE} ORDER BY ${order} LIMIT ? OFFSET ?`,
+		 WHERE g.set_id = ? AND g.score >= ? AND ${VISIBLE}${scope === null ? "" : IN_SCOPE("?")} ORDER BY ${order} LIMIT ? OFFSET ?`,
 	)
-		.bind(c.req.param("id"), min, PAGE + 1, offset)
+		.bind(c.req.param("id"), min, ...(scope === null ? [] : [scope]), PAGE + 1, offset)
 		.all<ItemRow & { score: number }>();
 	const rows = results.slice(0, PAGE);
 	return c.json({
@@ -1196,7 +1318,7 @@ similar.get("/smart-sets/:id/suggestions", async (c) => {
 });
 
 /**
- * 结果：正例 + 分数达到灵敏度（min，默认“标准”）的建议，按拍摄时间倒序，带每月张数。
+ * 结果：正例 + 分数达到灵敏度（min，默认“标准”）的建议，按拍摄时间倒序，带每月张数。指定了范围时只看范围里的（正例也是）。
  * notInAlbum：去掉已经在这个相册里的（挑过一轮之后只看新增的）；type：和相册一样的类型筛选。
  */
 similar.get("/smart-sets/:id/assets", async (c) => {
@@ -1204,15 +1326,16 @@ similar.get("/smart-sets/:id/assets", async (c) => {
 	const min = MinScore(c.req.query("min"), SMART_SET_SENSITIVITY.normal);
 	const album = ID.safeParse(c.req.query("notInAlbum"));
 	const type = typeCondition(TypeParam.parse(c.req.query("type")));
+	const scope = await scopeOfSet(c.env, id);
 	return c.json(
 		await page(
 			c.env,
 			`SELECT ${ITEM_COLUMNS} FROM assets a
 			 WHERE a.id IN (SELECT asset_id FROM smart_set_examples WHERE set_id = ? AND label = 1
 			                UNION ALL SELECT asset_id FROM smart_set_suggestions WHERE set_id = ? AND score >= ?)
-			   AND ${VISIBLE}${album.success ? " AND NOT EXISTS (SELECT 1 FROM album_assets x WHERE x.album_id = ? AND x.asset_id = a.id)" : ""}${andType(type)}
+			   AND ${VISIBLE}${scope === null ? "" : IN_SCOPE("?")}${album.success ? " AND NOT EXISTS (SELECT 1 FROM album_assets x WHERE x.album_id = ? AND x.asset_id = a.id)" : ""}${andType(type)}
 			 ORDER BY a.taken_at DESC, a.id DESC`,
-			[id, id, min, ...(album.success ? [album.data] : []), ...(type?.binds ?? [])],
+			[id, id, min, ...(scope === null ? [] : [scope]), ...(album.success ? [album.data] : []), ...(type?.binds ?? [])],
 			Offset(c),
 			{ withMonths: true },
 		),

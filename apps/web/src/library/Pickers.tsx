@@ -4,8 +4,9 @@ import { api } from "../api";
 import { invalidateLibrary } from "./actions";
 import { Modal } from "./Modal";
 import { albumsQuery, folderQuery, smartSetsQuery } from "./queries";
-import { IconCheck, IconChevronLeft, IconClose, IconFolder } from "../ui/icons";
+import { IconCheck, IconChevronLeft, IconChevronRight, IconClose, IconFolder } from "../ui/icons";
 import { t } from "../i18n";
+import { SMART_SET_MAX_FOLDERS } from "@nana/shared";
 
 export function AlbumPicker({ onPick, onClose }: { onPick: (albumId: string) => void; onClose: () => void }) {
 	const qc = useQueryClient();
@@ -91,6 +92,86 @@ export function FolderPicker({
 				onClick={() => onPick(current === "root" ? null : current)}
 			>
 				{t.pickers.moveTo(data?.path.at(-1)?.name ?? null)}
+			</button>
+		</Modal>
+	);
+}
+
+/**
+ * 主题的范围：逐级浏览文件夹，勾选多个（各自含子文件夹）。一个都不选就是整个资料库。
+ * 点名称进入子文件夹，点左边的圆圈选中 / 取消。
+ */
+export function FolderScopePicker({
+	initial,
+	onSave,
+	onClose,
+}: {
+	initial: { id: string; name: string }[];
+	onSave: (folders: string[]) => void;
+	onClose: () => void;
+}) {
+	const [current, setCurrent] = useState("root");
+	const [picked, setPicked] = useState(initial);
+	const { data } = useQuery(folderQuery(current));
+	const parent = data?.path.length ? (data.path.length > 1 ? data.path[data.path.length - 2]!.id : "root") : null;
+	const full = picked.length >= SMART_SET_MAX_FOLDERS;
+	const toggle = (f: { id: string; name: string }) =>
+		setPicked((p) => (p.some((x) => x.id === f.id) ? p.filter((x) => x.id !== f.id) : full ? p : [...p, { id: f.id, name: f.name }]));
+	return (
+		<Modal title={t.pickers.topicScope} onClose={onClose}>
+			<p className="mb-3 text-sm text-muted">{t.pickers.topicScopeIntro}</p>
+			<div className="mb-3 flex flex-wrap gap-1.5">
+				{picked.length === 0 && <span className="text-sm text-muted">{t.pickers.topicScopeAll}</span>}
+				{picked.map((f) => (
+					<button
+						key={f.id}
+						className="inline-flex h-7 max-w-full items-center gap-1 rounded-full bg-accent-soft px-2.5 text-sm text-accent-ink"
+						onClick={() => toggle(f)}
+						aria-label={t.pickers.topicScopeRemove(f.name)}
+					>
+						<span className="truncate">{f.name}</span>
+						<IconClose size={14} className="shrink-0" />
+					</button>
+				))}
+			</div>
+			<div className="mb-3 flex items-center gap-2 text-sm">
+				{parent && (
+					<button className="rounded-md px-2 py-1 hover:bg-surface" onClick={() => setCurrent(parent)} aria-label={t.pickers.up}>
+						<IconChevronLeft size={18} />
+					</button>
+				)}
+				<span className="font-medium">{data?.path.map((p) => p.name).join(" / ") || t.pickers.root}</span>
+			</div>
+			<ul className="mb-4 max-h-72 space-y-1 overflow-y-auto">
+				{data?.children.map((f) => {
+					const on = picked.some((x) => x.id === f.id);
+					return (
+						<li key={f.id} className="flex items-center gap-1 rounded-md hover:bg-surface">
+							<button
+								className={`ml-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${on ? "border-accent bg-accent text-accent-fg" : "border-border"} disabled:opacity-40`}
+								onClick={() => toggle(f)}
+								disabled={!on && full}
+								aria-pressed={on}
+								aria-label={t.pickers.topicScopeToggle(f.name)}
+							>
+								{on && <IconCheck size={14} />}
+							</button>
+							<button
+								className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-sm"
+								onClick={() => (f.subfolders ? setCurrent(f.id) : toggle(f))}
+							>
+								<IconFolder size={18} className="shrink-0 text-muted" />
+								<span className="truncate">{f.name}</span> <span className="text-muted">· {f.count}</span>
+								{f.subfolders > 0 && <IconChevronRight size={16} className="ml-auto shrink-0 text-muted" />}
+							</button>
+						</li>
+					);
+				})}
+				{data?.children.length === 0 && <li className="px-3 py-2 text-sm text-muted">{t.pickers.noSubfolders}</li>}
+			</ul>
+			{full && <p className="mb-3 text-sm text-muted">{t.pickers.topicScopeFull(SMART_SET_MAX_FOLDERS)}</p>}
+			<button className="btn-primary w-full" onClick={() => onSave(picked.map((f) => f.id))}>
+				{picked.length ? t.pickers.topicScopeSave(picked.length) : t.pickers.topicScopeSaveAll}
 			</button>
 		</Modal>
 	);

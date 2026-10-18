@@ -77,6 +77,16 @@ export async function refreshSmartSet(qc: QueryClient, setId: string) {
 	return res;
 }
 
+/** 主题的范围：文件夹 id（含子文件夹），空数组表示整个资料库。服务端会立即重新查找（几秒钟）。 */
+export async function setSmartSetFolders(qc: QueryClient, setId: string, folders: string[]) {
+	const res = await api<{ ok: true; suggestions?: number | null }>(`/smart-sets/${setId}`, {
+		method: "PATCH",
+		json: { folders: folders.length ? folders : null },
+	});
+	invalidateLibrary(qc);
+	return res;
+}
+
 /** 标记为“不是重复”（pivot：只有这张和其他几张不是），undo 为 true 时撤销同样的标记。 */
 export async function ignoreDuplicates(qc: QueryClient, ids: string[], pivot?: string, undo = false) {
 	const res = await api<{ pairs: number }>(`/duplicates/${undo ? "unignore" : "ignore"}`, { method: "POST", json: { ids, pivot } });

@@ -507,6 +507,66 @@ describe("smart sets", () => {
 		expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM smart_set_examples").first("n")).toBe(0);
 	});
 
+	it("limits suggestions and results to the chosen folders (including subfolders)", async () => {
+		const cat = randomVec();
+		const F = (n: number) => `FOLD${String(n).padStart(22, "0")}`;
+		await env.DB.batch([
+			env.DB.prepare("INSERT INTO folders (id, parent_id, name, created_at) VALUES (?, NULL, 'trip', 0)").bind(F(1)),
+			env.DB.prepare("INSERT INTO folders (id, parent_id, name, created_at) VALUES (?, ?, 'day1', 0)").bind(F(2), F(1)),
+			env.DB.prepare("INSERT INTO folders (id, parent_id, name, created_at) VALUES (?, NULL, 'other', 0)").bind(F(3)),
+		]);
+		for (let i = 1; i <= 40; i++) await seed_(i);
+		// 1–2 正例（1 在范围外），3 在 trip，4 在 trip/day1，5 在 other，6 在根目录：都是猫
+		const where: Record<number, string> = { 2: F(1), 3: F(1), 4: F(2), 5: F(3), 7: F(1) };
+		for (const [n, f] of Object.entries(where)) await env.DB.prepare("UPDATE assets SET folder_id = ? WHERE id = ?").bind(f, aid(Number(n))).run();
+		const vecs: Record<number, Int8Array> = { 1: near(cat), 2: near(cat), 3: near(cat), 4: near(cat), 5: near(cat), 6: near(cat) };
+		for (let i = 9; i <= 40; i++) vecs[i] = randomVec();
+		for (const [n, v] of Object.entries(vecs)) await saveFingerprint(env, aid(Number(n)), fp(randomHash(), v));
+
+		const id = (await call(env, "POST", "/smart-sets", { name: "猫", ids: [aid(1), aid(2)] })).json.id;
+		const ids = (r: { json: { items: unknown[][] } }) => r.json.items.map((i) => i[0] as string).sort();
+		const suggestions = async () => ids(await call(env, "GET", `/smart-sets/${id}/suggestions`));
+		const results = async () => ids(await call(env, "GET", `/smart-sets/${id}/assets`));
+		expect(await suggestions()).toEqual([aid(3), aid(4), aid(5), aid(6)]);
+
+		const patched = await call(env, "PATCH", `/smart-sets/${id}`, { folders: [F(1), aid(99)] });
+		expect(patched.json).toEqual({ ok: true, suggestions: 2 }); // 不存在的文件夹丢掉，改范围立即更新
+		expect(await suggestions()).toEqual([aid(3), aid(4)]);
+		expect(await results()).toEqual([aid(2), aid(3), aid(4)]); // 范围外的正例 1 照样用来训练，但不在结果里
+		expect((await call(env, "GET", `/smart-sets/${id}`)).json).toMatchObject({
+			dirty: false,
+			scoped: true,
+			positives: 2,
+			in_scope: 1,
+			folders: [{ id: F(1), name: "trip" }],
+			suggestions: { loose: 2 },
+		});
+		expect((await call(env, "GET", "/smart-sets")).json.items).toEqual([
+			expect.objectContaining({ id, scoped: true, positives: 2, in_scope: 1, matches: 2 }),
+		]);
+
+		// 新照片：只有范围里的才打分
+		await saveFingerprint(env, aid(7), fp(randomHash(), near(cat)));
+		await saveFingerprint(env, aid(8), fp(randomHash(), near(cat)));
+		expect(await suggestions()).toEqual([aid(3), aid(4), aid(7)]);
+
+		// 移出范围的照片在下次更新前也不显示
+		await env.DB.prepare("UPDATE assets SET folder_id = ? WHERE id = ?").bind(F(3), aid(4)).run();
+		expect(await suggestions()).toEqual([aid(3), aid(7)]);
+
+		// 改名不动范围；清空范围回到整个资料库
+		expect((await call(env, "PATCH", `/smart-sets/${id}`, { name: "小猫" })).json).toEqual({ ok: true });
+		expect((await call(env, "GET", `/smart-sets/${id}`)).json).toMatchObject({ name: "小猫", scoped: true });
+		expect((await call(env, "PATCH", `/smart-sets/${id}`, { folders: [aid(99)] })).status).toBe(404);
+		expect((await call(env, "PATCH", `/smart-sets/${id}`, { folders: null })).json.suggestions).toBe(6);
+		expect((await call(env, "GET", `/smart-sets/${id}`)).json).toMatchObject({ scoped: false, folders: null, in_scope: 2 });
+		await env.DB.batch([
+			env.DB.prepare("UPDATE assets SET folder_id = NULL"),
+			env.DB.prepare("DELETE FROM folders WHERE parent_id IS NOT NULL"),
+			env.DB.prepare("DELETE FROM folders"),
+		]);
+	});
+
 	it("cross-validates once there are enough samples of both kinds", async () => {
 		const cat = randomVec();
 		const dog = randomVec();

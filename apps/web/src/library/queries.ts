@@ -96,8 +96,12 @@ export interface SmartSetSummary {
 	/** 正例 / 反例的张数 */
 	positives: number;
 	negatives: number;
-	/** “标准”灵敏度下的建议数；结果 = 正例 + 建议 */
+	/** “标准”灵敏度下的建议数（指定了范围时只算范围里的）；结果 = in_scope + 建议 */
 	matches: number;
+	/** 指定了文件夹范围 */
+	scoped: boolean;
+	/** 范围里的正例数（没有范围时等于 positives） */
+	in_scope: number;
 	cover: string | null;
 	updated_at: number;
 	/** 标记改过（或者从没训练过），需要“更新” */
@@ -112,6 +116,8 @@ export interface SmartSetDetail extends SmartSetSummary {
 	/** 上次训练之后新标（或改了标签）的样本数 */
 	changed: number;
 	metrics: SmartSetMetrics | null;
+	/** 范围的根文件夹（含子文件夹；已删除的不在里面），null 表示整个资料库 */
+	folders: { id: string; name: string }[] | null;
 	/** 每档灵敏度的建议数（不含正例） */
 	suggestions: Record<SmartSetLevel, number>;
 	/** 实测准确率：标记时正好在建议里、分数达到这一档的样本数，和其中标成正例的 */
