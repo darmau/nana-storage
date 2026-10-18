@@ -108,7 +108,8 @@ const live = await scenario("Live Photo（同一组上传）", "live", [
 	{ role: "original", name: "IMG_0003.JPG", data: read("photo.jpg", salt + "live") },
 	{ role: "live_video", name: "IMG_0003.MOV", data: read("video.mov", salt) },
 ], { kind: "live", duration_ms: 3000, content_identifier: "TEST-CID-1234" });
-if (live?.files) check(live.files.some((f) => f.role === "video_preview"), "has H.264 video_preview");
+// Live Photo 的动态部分不转码（浏览器不能解码 HEVC 时只显示静态照片），见 CLAUDE.md
+if (live?.files) check(!live.files.some((f) => f.role === "video_preview"), "no H.264 video_preview (Live Photo motion is not transcoded)");
 
 const vid = await scenario("视频", "video", [{ role: "original", name: "clip.mov", data: read("video.mov", salt + "v") }], {
 	kind: "video", duration_ms: 3000,

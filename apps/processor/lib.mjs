@@ -57,10 +57,24 @@ let clipSession;
  * 和指纹一样按用户旋转之前的图像计算。
  */
 const FACE_EDGE = 1920;
-/** ONNX 推理线程数：容器只有 1 vCPU，用 1；设备端可以用 ORT_THREADS 调整。 */
+/** ONNX 推理线程数：容器只有 1 vCPU，用 1；设备端由推理线程池（apps/device/inference.mjs）按 CPU 数决定。 */
 const ORT_THREADS = Math.max(1, Number(process.env.ORT_THREADS) || 1);
 const ORT_OPTS = { intraOpNumThreads: ORT_THREADS, interOpNumThreads: 1, graphOptimizationLevel: "all", logSeverityLevel: 3 };
 let faceSessions;
+
+/**
+ * 推理会话从哪里来。默认在本线程用 onnxruntime 打开（容器只有 1 vCPU，没有别的可分）。
+ * onnxruntime-node 的 run() 其实在调用它的线程上同步执行，设备端并发处理时所有推理会排队挤在主线程上，
+ * 所以设备端换成 worker 线程池（setSessionFactory）。会话要有 inputNames、outputNames 和
+ * run(feeds) → { [输出名]: { data } }；feeds 是 ort.Tensor。换线程数、换线程不改变推理结果。
+ */
+let openSession = (path, opts) => ort.InferenceSession.create(path, opts);
+export function setSessionFactory(fn) {
+	openSession = fn;
+	clipSession = undefined;
+	faceSessions = undefined;
+}
+export { ort };
 
 export function run(cmd, args, { timeoutMs = 60_000, capture = true } = {}) {
 	return new Promise((resolve, reject) => {
@@ -104,9 +118,145 @@ export async function saveInput(source, path) {
 	return { path, sha256: hash.digest("hex"), size, crc32: crc >>> 0 };
 }
 
+/**
+ * 常驻的 exiftool（-stay_open）：每次单独启动 exiftool 要先加载 Perl 和模块，约 80 毫秒，每个任务至少一次。
+ * 一个进程同时只跑一条命令；最多 exiftoolMax 个进程（容器 1 个，设备端按 CPU 数，setExiftoolProcs），不够时排队。
+ * 每条命令有硬超时：超时就 SIGKILL 这个进程（之后按需重新启动），和单独启动时一样。
+ * 只用于读元数据（-json）；RAW 内嵌预览（-b 二进制输出）和改方向仍然单独启动。
+ */
+class ExifTool {
+	constructor() {
+		this.child = spawn("exiftool", ["-stay_open", "True", "-@", "-"], { stdio: ["pipe", "pipe", "pipe"] });
+		this.seq = 0;
+		this.out = "";
+		this.err = "";
+		this.pending = null;
+		this.dead = false;
+		this.child.stdout.setEncoding("utf8");
+		this.child.stdout.on("data", (d) => {
+			this.out += d;
+			this.check();
+		});
+		this.child.stderr.on("data", (d) => {
+			if (this.err.length < 8000) this.err += d;
+		});
+		const die = (e) => {
+			this.dead = true;
+			this.pending?.reject(e ?? new Error("exiftool exited"));
+			this.pending = null;
+		};
+		this.child.on("error", die);
+		this.child.on("close", () => die());
+		// 空闲的常驻进程不应该让 Node 进程退不出去；有命令在跑时 ref（exec），否则等输出期间进程可能先退出
+		this.ref(false);
+	}
+
+	ref(on) {
+		for (const h of [this.child, this.child.stdin, this.child.stdout, this.child.stderr]) (on ? h.ref : h.unref)?.call(h);
+	}
+
+	exec(args, timeoutMs) {
+		if (args.some((a) => /[\r\n]/.test(a))) return Promise.reject(new Error("bad exiftool argument"));
+		const seq = ++this.seq;
+		this.out = "";
+		this.err = "";
+		this.ref(true);
+		return new Promise((res, rej) => {
+			const resolve = (v) => {
+				this.ref(false);
+				res(v);
+			};
+			const reject = (e) => {
+				this.ref(false);
+				rej(e);
+			};
+			const timer = setTimeout(() => {
+				this.child.kill("SIGKILL");
+				die(new Error(`exiftool failed (timeout ${timeoutMs}ms)`));
+			}, timeoutMs);
+			const die = (e) => {
+				clearTimeout(timer);
+				this.dead = true;
+				this.pending = null;
+				reject(e);
+			};
+			this.pending = {
+				marker: `{ready${seq}}`,
+				resolve: (out) => {
+					clearTimeout(timer);
+					resolve({ out, err: this.err });
+				},
+				reject: (e) => {
+					clearTimeout(timer);
+					reject(new Error(`${e.message}: ${this.err.slice(-2000)}`));
+				},
+			};
+			this.child.stdin.write(`${args.join("\n")}\n-execute${seq}\n`);
+		});
+	}
+
+	check() {
+		const p = this.pending;
+		if (!p) return;
+		const i = this.out.indexOf(p.marker);
+		if (i < 0) return;
+		const out = this.out.slice(0, i);
+		this.out = this.out.slice(i + p.marker.length).replace(/^\r?\n/, "");
+		this.pending = null;
+		p.resolve(out);
+	}
+}
+
+let exiftoolMax = 1;
+const exiftools = [];
+const exiftoolWaiting = [];
+
+/** 最多同时运行几个常驻 exiftool（设备端并发处理时用）。 */
+export function setExiftoolProcs(n) {
+	exiftoolMax = Math.max(1, Math.floor(n) || 1);
+}
+
+async function exiftool(args, timeoutMs) {
+	let tool = exiftools.find((t) => !t.busy && !t.dead);
+	if (!tool && exiftools.filter((t) => !t.dead).length < exiftoolMax) {
+		tool = new ExifTool();
+		exiftools.push(tool);
+	}
+	if (!tool) tool = await new Promise((resolve) => exiftoolWaiting.push(resolve));
+	tool.busy = true;
+	try {
+		return await tool.exec(args, timeoutMs);
+	} finally {
+		tool.busy = false;
+		if (tool.dead) exiftools.splice(exiftools.indexOf(tool), 1);
+		const next = exiftoolWaiting.shift();
+		if (next) {
+			// 进程死了就交给排队的人一个新的
+			let t = tool.dead ? null : tool;
+			if (!t) {
+				t = new ExifTool();
+				exiftools.push(t);
+			}
+			t.busy = true;
+			next(t);
+		}
+	}
+}
+
+process.on("exit", () => {
+	for (const t of exiftools) t.child.kill();
+});
+
 async function exif(path) {
-	const out = await run("exiftool", ["-json", "-n", "-api", "largefilesupport=1", "-ee3", path], { timeoutMs: 30_000 });
-	const [meta] = JSON.parse(out.toString("utf8"));
+	const { out, err } = await exiftool(["-json", "-n", "-api", "largefilesupport=1", "-ee3", path], 30_000);
+	// 和单独启动时一样：读不了的文件（exiftool 退出码 1）要让任务失败。常驻模式没有退出码：没有 JSON，或者带 Error 字段
+	let meta;
+	try {
+		[meta] = JSON.parse(out);
+	} catch {
+		throw new Error(`exiftool failed: ${(out + err).trim().slice(-2000)}`);
+	}
+	if (!meta || meta.Error) throw new Error(`exiftool failed: ${meta?.Error ?? "no output"}`);
 	delete meta.SourceFile;
 	delete meta.Directory;
 	delete meta.FileName;
@@ -349,7 +499,7 @@ export function phashFromRgb(px) {
 
 async function embed(px) {
 	// 设备端会并发调用：会话只创建一次（存 Promise），run 本身可以并发
-	clipSession ??= ort.InferenceSession.create("/app/model/clip-vision.onnx", {
+	clipSession ??= openSession("/app/model/clip-vision.onnx", {
 		intraOpNumThreads: ORT_THREADS,
 		interOpNumThreads: 1,
 		graphOptimizationLevel: "all",
@@ -391,10 +541,7 @@ export const FACES_ENABLED = process.env.NANA_FACES !== "off";
 async function faces(source, dir) {
 	try {
 		const { px, width, height } = await rgbImage(source, dir, FACE_EDGE, ["--size", "down"], "faces");
-		faceSessions ??= Promise.all([
-			ort.InferenceSession.create("/app/model/face-det.onnx", ORT_OPTS),
-			ort.InferenceSession.create("/app/model/face-rec.onnx", ORT_OPTS),
-		])
+		faceSessions ??= Promise.all([openSession("/app/model/face-det.onnx", ORT_OPTS), openSession("/app/model/face-rec.onnx", ORT_OPTS)])
 			.then(([det, rec]) => ({ det, rec }))
 			.catch((e) => {
 				faceSessions = undefined; // 下次再试

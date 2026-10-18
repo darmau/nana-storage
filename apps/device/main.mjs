@@ -4,7 +4,9 @@ import { availableParallelism, tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { setExiftoolProcs, setSessionFactory } from "../processor/lib.mjs";
 import { Api, ApiError, Auth, AuthError, normalizeSite, sleep } from "./client.mjs";
+import { InferencePool, poolSize } from "./inference.mjs";
 import { LocalFiles } from "./local.mjs";
 import { runJob } from "./runner.mjs";
 import { Uploads } from "./upload.mjs";
@@ -36,6 +38,12 @@ const RATE_WINDOW_MS = 10 * 60_000;
 const CLAIM_MAX = 16;
 
 const cpus = availableParallelism();
+
+// 推理放进 worker 线程池（主线程上的推理会让所有并发任务排队挤在一个核上），exiftool 常驻多开几个。见 inference.mjs。
+const inference = poolSize(cpus);
+const pool = new InferencePool(inference);
+setSessionFactory(pool.open);
+setExiftoolProcs(inference.workers);
 const defaults = {
 	site: process.env.NANA_SITE ?? "",
 	name: process.env.NANA_DEVICE_NAME ?? "nana-device",
@@ -473,7 +481,9 @@ const server = createServer(async (req, res) => {
 	}
 });
 server.listen(PORT, "0.0.0.0", () => {
-	console.log(`nana-device: http://localhost:${PORT}  (${cpus} CPUs, concurrency ${config.concurrency})`);
+	console.log(
+		`nana-device: http://localhost:${PORT}  (${cpus} CPUs, concurrency ${config.concurrency}, inference ${inference.workers}×${inference.threads} threads)`,
+	);
 });
 
 /**
@@ -485,6 +495,9 @@ async function selfCheck() {
 	const files = FACES_ENABLED ? ["clip-vision.onnx", "face-det.onnx", "face-rec.onnx"] : ["clip-vision.onnx"];
 	for (const f of files) await access(`/app/model/${f}`, constants.R_OK);
 	for (const [cmd, args] of [["vips", ["--version"]], ["exiftool", ["-ver"]], ["ffmpeg", ["-version"]]]) await run(cmd, args, { timeoutMs: 10_000 });
+	// 推理线程池能打开模型（顺便把 CLIP 预先加载进第一个 worker）
+	// 选项和 lib.mjs 的 embed() 一样，预先加载的就是之后处理用的那个会话
+	await pool.open("/app/model/clip-vision.onnx", { interOpNumThreads: 1, graphOptimizationLevel: "all" });
 }
 healthy = await selfCheck().then(
 	() => true,
