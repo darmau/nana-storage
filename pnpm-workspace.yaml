@@ -1,0 +1,10 @@
+packages:
+  - "apps/*"
+  # 容器的运行时依赖由 Dockerfile 用 npm ci 安装，不进工作区
+  - "!apps/processor"
+  # 设备端处理只在 Docker 里运行（apps/processor/Dockerfile 的 device 阶段），没有依赖，不进工作区
+  - "!apps/device"
+  - "packages/*"
+allowBuilds:
+  esbuild: true
+  workerd: true

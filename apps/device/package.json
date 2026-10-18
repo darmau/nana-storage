@@ -1,0 +1,10 @@
+{
+	"name": "@nana/device",
+	"license": "AGPL-3.0-only",
+	"private": true,
+	"description": "设备端处理：在自己的电脑上（Docker）代替 Cloudflare 容器处理照片。只在 Docker 里运行，见 README.md。",
+	"type": "module",
+	"scripts": {
+		"test": "node --test \"test/*.test.mjs\""
+	}
+}

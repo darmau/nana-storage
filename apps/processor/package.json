@@ -1,0 +1,10 @@
+{
+	"name": "@nana/processor-runtime",
+	"license": "AGPL-3.0-only",
+	"private": true,
+	"description": "容器内的运行时依赖，只在 Dockerfile 里用 npm ci 安装，不属于 pnpm 工作区。",
+	"type": "module",
+	"dependencies": {
+		"onnxruntime-node": "1.30.0"
+	}
+}

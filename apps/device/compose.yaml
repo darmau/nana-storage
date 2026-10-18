@@ -1,0 +1,32 @@
+# 设备端处理：在 apps/device 下运行 docker compose up -d --build，然后打开 http://localhost:7878
+# 镜像和 Cloudflare 容器同一个 Dockerfile（apps/processor/Dockerfile 的 device 阶段），处理结果完全一致。
+name: nana-device
+services:
+  device:
+    build:
+      context: ../processor
+      target: device
+      additional_contexts:
+        device-src: .
+        # 上传分组和浏览器共用 packages/shared/src/group.ts（Node 直接加载 .ts）
+        shared-src: ../../packages/shared/src
+      args:
+        # off：不下载人脸模型、不做人脸识别。要和 Workers Builds 的构建变量 NANA_FACES 一致（见 Dockerfile）
+        NANA_FACES: ${NANA_FACES:-on}
+    image: nana-device:local
+    restart: unless-stopped
+    # 只绑定本机：界面没有自己的密码，不能暴露到局域网
+    ports:
+      - "127.0.0.1:7878:7878"
+    environment:
+      # 可选：第一次启动就用这些值（之后以界面里保存的设置为准）
+      NANA_SITE: ${NANA_SITE:-}
+      NANA_DEVICE_NAME: ${NANA_DEVICE_NAME:-nana-device}
+    volumes:
+      - data:/data
+      - cloudflared:/home/node/.cloudflared
+    # 退出时要把手上的任务退回服务器、交还云端
+    stop_grace_period: 30s
+volumes:
+  data:
+  cloudflared:

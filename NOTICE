@@ -1,0 +1,43 @@
+nana-storage
+Copyright (C) 2026 李大毛 (darmau)
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, version 3 (see LICENSE). If you run a modified version as
+a network service, AGPL section 13 requires you to offer its source code to
+the users of that service.
+
+-------------------------------------------------------------------------------
+Third-party components
+-------------------------------------------------------------------------------
+
+The license above covers the code in this repository only. The following
+components are downloaded at build time and remain under their own licenses.
+Check each upstream project for the exact terms.
+
+Machine learning models (apps/processor/Dockerfile)
+
+  * InsightFace buffalo_l (SCRFD face detection, ArcFace recognition),
+    ONNX export by Immich (huggingface.co/immich-app/buffalo_l).
+    InsightFace's pretrained model weights are licensed for NON-COMMERCIAL
+    RESEARCH PURPOSES ONLY. Face recognition in this project therefore must
+    not be used commercially, even though the AGPL itself permits commercial
+    use of the code. Build with NANA_FACES=off to leave these weights out of
+    the image entirely (docs/deploy.md). See
+    https://github.com/deepinsight/insightface.
+
+  * OpenAI CLIP ViT-B/32 image encoder, int8 ONNX export by Xenova
+    (huggingface.co/Xenova/clip-vit-base-patch32). MIT License.
+
+Container software (Debian packages and npm)
+
+  * libvips, libheif and its plugins, LibRaw, ExifTool, FFmpeg
+    (Debian builds, each under its own GPL / LGPL / Artistic-style license).
+  * ONNX Runtime (onnxruntime-node). MIT License.
+  * cloudflared (device image only). Apache License 2.0.
+
+Map data
+
+  * Base map tiles are loaded by the browser from OpenFreeMap
+    (https://openfreemap.org), based on OpenMapTiles and OpenStreetMap data
+    (© OpenStreetMap contributors, ODbL).

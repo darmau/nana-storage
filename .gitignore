@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.local
+.DS_Store
+worker-configuration.d.ts
+.map-data/
+wrangler.test.generated.json
+wrangler.deploy.json

@@ -1,0 +1,23 @@
+{
+  "name": "nana-storage",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "check:cost-rules": "node scripts/check-cost-rules.mjs",
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "e2e": "node scripts/e2e-upload.mjs",
+    "smoke:processor": "cd apps/processor && sh test/smoke.sh",
+    "ci": "pnpm check:cost-rules && pnpm check:i18n --strict && pnpm --filter @nana/web build && pnpm -r typecheck && pnpm --filter @nana/worker test && pnpm --filter @nana/web test",
+    "deploy": "node scripts/render-wrangler.mjs && pnpm --filter @nana/worker run deploy:prod",
+    "setup": "node scripts/setup.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.13.0"
+  }
+}

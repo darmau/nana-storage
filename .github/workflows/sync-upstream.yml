@@ -1,0 +1,69 @@
+# 部署者的 fork 用：每周把 main 快进到上游最新的发布版本（v* tag），Workers Builds 随后自动迁移和部署。
+# fork 默认不运行 Actions，需要在 fork 的 Actions 页面手动启用。在上游仓库（没有 parent）里什么都不做。
+#
+# 仓库变量（Settings → Secrets and variables → Actions → Variables，可选）：
+#   NANA_SYNC_REF  跟随的上游引用：latest-tag（默认，最新的 v* tag）或分支名（比如 main）
+#
+# 只做快进：你的 main 上有上游没有的提交时直接失败，不自动合并。
+# 上游的新版本改了 .github/workflows 下的文件时，GITHUB_TOKEN 没有权限推送，这次会失败，
+# 到 GitHub 上点一次 Sync fork 即可。
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Find upstream
+        id: up
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          parent=$(gh api "repos/$GITHUB_REPOSITORY" --jq '.parent.full_name // empty')
+          echo "parent=$parent" >> "$GITHUB_OUTPUT"
+          [ -n "$parent" ] || echo "不是 fork，跳过。"
+
+      - uses: actions/checkout@v4
+        if: steps.up.outputs.parent != ''
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Fast-forward main
+        if: steps.up.outputs.parent != ''
+        env:
+          PARENT: ${{ steps.up.outputs.parent }}
+          SYNC_REF: ${{ vars.NANA_SYNC_REF || 'latest-tag' }}
+        run: |
+          set -eu
+          git remote add upstream "https://github.com/$PARENT.git"
+          git fetch --quiet --tags upstream
+          if [ "$SYNC_REF" = "latest-tag" ]; then
+            target=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
+            if [ -z "$target" ]; then echo "上游还没有发布版本（v* tag），跳过。"; exit 0; fi
+          else
+            git fetch --quiet upstream "$SYNC_REF"
+            target=FETCH_HEAD
+          fi
+          if git merge-base --is-ancestor "$target" HEAD; then
+            echo "已经是最新（$target）。"; exit 0
+          fi
+          if ! git merge-base --is-ancestor HEAD "$target"; then
+            echo "::error::main 上有上游没有的提交，不能快进。请手动合并，或者在 GitHub 上用 Sync fork。"
+            exit 1
+          fi
+          git merge --ff-only "$target"
+          git push origin HEAD:main
+          echo "已更新到 $target。"

@@ -1,0 +1,25 @@
+{
+  "name": "@nana/worker",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "types": "wrangler types --strict-vars=false",
+    "typecheck": "wrangler types --strict-vars=false && tsc --noEmit",
+    "test": "vitest run && vitest run -c vitest.node.config.ts",
+    "deploy:prod": "wrangler d1 migrations apply nana-db --remote -c wrangler.deploy.json && wrangler deploy -c wrangler.deploy.json"
+  },
+  "dependencies": {
+    "@nana/shared": "workspace:*",
+    "hono": "^4.13.13",
+    "jose": "^6.2.12",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3",
+    "wrangler": "^4.149.0"
+  }
+}

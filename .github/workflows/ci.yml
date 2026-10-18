@@ -1,0 +1,34 @@
+# 贡献者的 PR 和上游 main 的推送跑一遍和 Workers Builds 相同的检查（成本规则 + i18n + 类型检查 + 测试 + 前端构建），
+# 再加上设备端的测试。部署者的 fork 里只在 PR 上运行（fork 的部署由 Workers Builds 负责，不需要重复跑）。
+# 不访问 Cloudflare 账号，不需要任何 secret。
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    if: github.event_name == 'pull_request' || !github.event.repository.fork
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run ci
+      - name: Device tests
+        working-directory: apps/device
+        run: node --test "test/*.test.mjs"

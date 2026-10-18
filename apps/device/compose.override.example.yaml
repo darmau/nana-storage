@@ -1,0 +1,8 @@
+# 可选：本机的原件目录。复制成 compose.override.yaml（不进仓库，docker compose 会自动合并），改成你自己的路径。
+# 上传的文件在这些目录里找得到（大小和 sha256 都一样）时不再从服务器下载，见 README 的“本机原件”。
+# 只读挂载；可以挂多个，都放在 /local 下面。Docker Desktop 默认能访问 /Users 和 /Volumes。
+services:
+  device:
+    volumes:
+      - /Users/me/Pictures/Export:/local/export:ro
+      - /Volumes/NAS/Photos:/local/nas:ro

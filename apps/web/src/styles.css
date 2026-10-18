@@ -1,0 +1,451 @@
+@import "tailwindcss";
+
+/* dark: 跟随设置页的“外观”：选了浅色 / 深色时以 <html data-theme> 为准，否则跟随系统 */
+@custom-variant dark {
+	@media (prefers-color-scheme: dark) {
+		&:where(:root:not([data-theme="light"]) *) {
+			@slot;
+		}
+	}
+	&:where(:root[data-theme="dark"] *) {
+		@slot;
+	}
+}
+
+/*
+ * 设计 token。组件里只用这些语义色（bg-bg、text-muted、bg-accent …），不直接写色值，
+ * 这样浅色 / 深色 / 查看器的强制深色（.theme-dark）都只需要在这里改。
+ * CSP 只允许 'self'：不加载任何 Web 字体，全部用系统字体。
+ * 用 inline：工具类直接引用 var(--bg) 等变量，子树里重新定义变量（.theme-dark）才会生效。
+ */
+@theme inline {
+	--color-bg: var(--bg);
+	--color-surface: var(--surface);
+	--color-surface-2: var(--surface-2);
+	--color-card: var(--card);
+	--color-border: var(--border);
+	--color-fg: var(--fg);
+	--color-muted: var(--muted);
+	--color-accent: var(--accent);
+	--color-accent-fg: var(--accent-fg);
+	--color-accent-soft: var(--accent-soft);
+	--color-accent-ink: var(--accent-ink);
+	--color-danger: var(--danger);
+	--color-ok: var(--ok);
+	--color-notice: var(--notice);
+	--color-warn: var(--warn);
+}
+
+:root {
+	/*
+	 * 安全区（刘海、Home 指示条、横屏的圆角）已经算进这几个尺寸里：
+	 * 顶栏 / 底栏 / 侧边栏自己用 padding 让出安全区，其余固定定位的元素照旧按变量避让即可。
+	 */
+	--safe-top: env(safe-area-inset-top, 0px);
+	--safe-bottom: env(safe-area-inset-bottom, 0px);
+	--safe-left: env(safe-area-inset-left, 0px);
+	--safe-right: env(safe-area-inset-right, 0px);
+	--header-h: calc(60px + var(--safe-top));
+	--sidebar-w: calc(240px + var(--safe-left));
+	--tabbar-h: calc(64px + var(--safe-bottom));
+
+	--bg: #fafaf8;
+	--surface: #eeefec;
+	--surface-2: #e4e5e1;
+	--card: #ffffff;
+	--border: #e2e3de;
+	--fg: #17191c;
+	--muted: #5b6068;
+	--accent: #1f5fd6;
+	--accent-fg: #ffffff;
+	--accent-soft: #e3ebfb;
+	--accent-ink: #123f99;
+	--danger: #a33a2a;
+	--ok: #2f7a5b;
+	--notice: #f3eee6;
+	--warn: #a86b12;
+	color-scheme: light;
+}
+
+/* 深色：跟随系统（设置里没有强制浅色时），或者设置里选了深色 */
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--bg: #0e0f11;
+		--surface: #1b1d21;
+		--surface-2: #25282d;
+		--card: #17191c;
+		--border: #2a2d33;
+		--fg: #f2f3f0;
+		--muted: #a9aeb6;
+		--accent: #9dbbf5;
+		--accent-fg: #0e1a33;
+		--accent-soft: rgb(157 187 245 / 0.16);
+		--accent-ink: #c3d5f9;
+		--danger: #f08a7a;
+		--ok: #7fc8a4;
+		--notice: #2a251c;
+		--warn: #f2c66d;
+		color-scheme: dark;
+	}
+}
+
+/* 设置里选了深色；查看器不管主题，一律深色 */
+:root[data-theme="dark"],
+.theme-dark {
+	--bg: #0e0f11;
+	--surface: #1b1d21;
+	--surface-2: #25282d;
+	--card: #17191c;
+	--border: #2a2d33;
+	--fg: #f2f3f0;
+	--muted: #a9aeb6;
+	--accent: #9dbbf5;
+	--accent-fg: #0e1a33;
+	--accent-soft: rgb(157 187 245 / 0.16);
+	--accent-ink: #c3d5f9;
+	--danger: #f08a7a;
+	--ok: #7fc8a4;
+	--warn: #f2c66d;
+	--notice: #2a251c;
+	color-scheme: dark;
+}
+
+html,
+body {
+	background: var(--bg);
+	color: var(--fg);
+	font-family:
+		ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei",
+		sans-serif;
+	-webkit-font-smoothing: antialiased;
+	-webkit-tap-highlight-color: transparent;
+	/* 去掉双击缩放带来的点击延迟；查看器自己处理双击和捏合 */
+	touch-action: manipulation;
+	/* 横屏时 iOS 不要自己放大文字 */
+	-webkit-text-size-adjust: 100%;
+	text-size-adjust: 100%;
+}
+
+/*
+ * 页面有自己的拖动条（timeline/Scrubber.tsx，时间线和文件夹 / 相册等列表）时：
+ * 隐藏浏览器的滚动条（仍然可以滚动），整个内容区（包括页头的按钮）给拖动条让出右侧的位置。
+ * 宽度和 Scrubber 的 w-10 / sm:w-14 一致。
+ */
+html.has-scrubber {
+	scrollbar-width: none;
+}
+html.has-scrubber::-webkit-scrollbar {
+	display: none;
+}
+html.has-scrubber main {
+	padding-right: calc(var(--safe-right) + 2.5rem);
+}
+@media (min-width: 40rem) {
+	html.has-scrubber main {
+		padding-right: calc(var(--safe-right) + 3.5rem);
+	}
+}
+
+/*
+ * 拖动拖动条或快速滚动期间（library/scrub.ts）网格不挂载任何格子，整个列表容器画一层格子图案代替：
+ * 两层渐变画出格子之间的缝，随内容一起滚动，看起来像一屏还没加载的照片（参考 Google 相册）。
+ * 格子大小接近 timeline/layout.ts 的行高 200（窄屏更小），缝和 gap 一致。
+ */
+.scrub-placeholder {
+	--ph-w: 268px;
+	--ph-h: 204px;
+	--ph-gap: 4px;
+	background-color: var(--surface);
+	background-image:
+		linear-gradient(90deg, var(--bg) var(--ph-gap), transparent var(--ph-gap)),
+		linear-gradient(0deg, var(--bg) var(--ph-gap), transparent var(--ph-gap));
+	background-size: var(--ph-w) var(--ph-h);
+	background-position: calc(var(--ph-gap) * -1) 0;
+}
+/* 列表视图（library/AssetRows.tsx）的占位：每行 56px，左边一个缩略图、右边一条名称 */
+.scrub-placeholder-rows {
+	background-image:
+		linear-gradient(transparent 8px, var(--surface) 8px, var(--surface) 48px, transparent 48px),
+		linear-gradient(transparent 22px, var(--surface) 22px, var(--surface) 34px, transparent 34px);
+	background-size:
+		40px 56px,
+		min(40%, 16rem) 56px;
+	background-position:
+		0 0,
+		52px 0;
+	background-repeat: repeat-y;
+}
+@media (max-width: 39.99rem) {
+	.scrub-placeholder {
+		--ph-w: 130px;
+		--ph-h: 132px;
+		--ph-gap: 2px;
+	}
+}
+
+/*
+ * 从主屏幕打开（独立窗口）时更像原生 App：
+ *  - 页面滚到头不回弹、不触发系统的下拉刷新（改用 ui/PullToRefresh.tsx 自己的下拉刷新）；
+ *  - 长按链接不弹出系统的链接预览菜单。
+ */
+@media (display-mode: standalone) {
+	html,
+	body {
+		overscroll-behavior: none;
+	}
+	a {
+		-webkit-touch-callout: none;
+	}
+}
+
+/* 放在 base 层，组件上的 outline-none 等工具类才能覆盖它 */
+@layer base {
+	:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+}
+
+@layer components {
+	/* 通用按钮 */
+	.btn {
+		@apply inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-full border border-border bg-card px-4 text-sm font-medium text-fg transition hover:bg-surface disabled:pointer-events-none disabled:opacity-50;
+	}
+	.btn-primary {
+		@apply inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-full bg-accent px-4 text-sm font-semibold text-accent-fg transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50;
+	}
+	.btn-danger {
+		@apply text-danger;
+	}
+	/* 确认框里的危险操作 */
+	.btn-solid-danger {
+		@apply inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-full bg-danger px-4 text-sm font-semibold text-bg transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-50;
+	}
+	.icon-btn {
+		@apply inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-fg transition hover:bg-surface disabled:opacity-40;
+	}
+	.field {
+		@apply rounded-xl border border-border bg-card px-3 py-2 text-sm text-fg placeholder:text-muted;
+	}
+	.page-title {
+		@apply text-2xl font-bold tracking-tight;
+	}
+}
+
+/*
+ * 动效：查看器打开 / 关闭 / 切换照片，弹窗、菜单、操作栏出现，页面切换。都很短（≤ 320ms），只动 opacity 和 transform。
+ * 系统设置了“减少动态效果”时全部关闭（查看器的 JS 里也会跳过等待，页面切换在 ui/motion.ts 里直接跳过）。
+ * 曲线：进入用减速（--ease-out），离开用加速。
+ */
+:root {
+	--ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+	--ease-spring: cubic-bezier(0.32, 1.25, 0.5, 1);
+}
+@keyframes fade-in {
+	from {
+		opacity: 0;
+	}
+}
+@keyframes fade-out {
+	to {
+		opacity: 0;
+	}
+}
+@keyframes pop-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px) scale(0.97);
+	}
+}
+@keyframes zoom-in {
+	from {
+		transform: scale(0.92);
+	}
+}
+@keyframes zoom-out {
+	to {
+		transform: scale(0.94);
+	}
+}
+@keyframes slide-in {
+	from {
+		opacity: 0;
+		transform: translateX(var(--enter-x, 0));
+	}
+}
+@keyframes rise-in {
+	from {
+		transform: translateY(100%);
+	}
+}
+@keyframes side-in {
+	from {
+		opacity: 0;
+		transform: translateX(24px);
+	}
+}
+@keyframes menu-in {
+	from {
+		opacity: 0;
+		transform: scale(0.94);
+	}
+}
+@keyframes pill-in {
+	from {
+		opacity: 0.5;
+		transform: scale(0.82);
+	}
+}
+.fade-in {
+	animation: fade-in 200ms ease-out;
+}
+.fade-out {
+	animation: fade-out 160ms ease-in forwards;
+}
+.pop-in {
+	animation: pop-in 200ms var(--ease-out);
+}
+.viewer-zoom-in {
+	animation: zoom-in 240ms var(--ease-out);
+}
+.viewer-zoom-out {
+	animation: zoom-out 180ms ease-in forwards;
+}
+.viewer-slide-in {
+	animation: slide-in 220ms var(--ease-out);
+}
+/* 右键菜单：从鼠标 / 按钮所在的角展开（transform-origin 由 ContextMenu 设置） */
+.menu-in {
+	animation: menu-in 140ms var(--ease-out);
+}
+/* 底部弹出（手机上的弹窗、多选操作栏、查看器的信息面板），宽屏时改成浮起 / 从右侧滑入 */
+.sheet-in {
+	animation: rise-in 280ms var(--ease-out);
+}
+.bar-in {
+	animation: rise-in 240ms var(--ease-out);
+}
+.panel-in {
+	animation: rise-in 280ms var(--ease-out);
+}
+@media (min-width: 40rem) {
+	.sheet-in {
+		animation: pop-in 200ms var(--ease-out);
+	}
+	.bar-in {
+		animation: pop-in 220ms var(--ease-spring);
+	}
+	.panel-in {
+		animation: side-in 220ms var(--ease-out);
+	}
+}
+/* 底部标签选中时的胶囊 */
+.tab-pill-in {
+	animation: pill-in 260ms var(--ease-spring);
+}
+/* 缩略图：从网络加载的淡入（过渡用格子上的 transition），已经在内存缓存里的直接显示（Tile 的 ref 里标记） */
+.thumb:not([data-loaded]) {
+	opacity: 0;
+}
+
+/*
+ * 页面切换（ui/motion.ts 决定类型）。顶栏、侧边栏、底部标签有自己的名字，不参与滑动。
+ * 新旧两张快照叠在一起：进入下一层时新页面从右边推进来，旧页面往左退一点并变暗；返回反过来。
+ */
+@keyframes page-in-right {
+	from {
+		opacity: 0;
+		transform: translateX(min(12vw, 72px));
+	}
+}
+@keyframes page-out-left {
+	to {
+		opacity: 0;
+		transform: translateX(min(-4vw, -24px));
+	}
+}
+@keyframes page-in-left {
+	from {
+		opacity: 0;
+		transform: translateX(min(-4vw, -24px));
+	}
+}
+@keyframes page-out-right {
+	to {
+		opacity: 0;
+		transform: translateX(min(12vw, 72px));
+	}
+}
+@keyframes page-in-up {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+}
+html:active-view-transition-type(page-forward, page-back, page-fade) {
+	&::view-transition-old(root),
+	&::view-transition-new(root) {
+		mix-blend-mode: normal;
+	}
+}
+html:active-view-transition-type(page-forward) {
+	&::view-transition-old(root) {
+		animation: page-out-left 200ms ease-in both;
+	}
+	&::view-transition-new(root) {
+		animation: page-in-right 280ms var(--ease-out) both;
+	}
+}
+html:active-view-transition-type(page-back) {
+	&::view-transition-old(root) {
+		animation: page-out-right 200ms ease-in both;
+	}
+	&::view-transition-new(root) {
+		animation: page-in-left 280ms var(--ease-out) both;
+	}
+}
+html:active-view-transition-type(page-fade) {
+	&::view-transition-old(root) {
+		animation: fade-out 120ms ease-in both;
+	}
+	&::view-transition-new(root) {
+		animation: page-in-up 220ms var(--ease-out) 60ms both;
+	}
+}
+/* 顶栏 / 侧边栏 / 底部标签：选中项的变化直接切换，不做交叉淡化 */
+::view-transition-group(app-header),
+::view-transition-group(app-sidebar),
+::view-transition-group(app-tabbar) {
+	animation-duration: 0s;
+}
+::view-transition-old(app-header),
+::view-transition-old(app-sidebar),
+::view-transition-old(app-tabbar) {
+	display: none;
+}
+::view-transition-new(app-header),
+::view-transition-new(app-sidebar),
+::view-transition-new(app-tabbar) {
+	animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.fade-in,
+	.fade-out,
+	.pop-in,
+	.viewer-zoom-in,
+	.viewer-zoom-out,
+	.viewer-slide-in,
+	.menu-in,
+	.sheet-in,
+	.bar-in,
+	.panel-in,
+	.tab-pill-in {
+		animation: none;
+	}
+	::view-transition-group(*),
+	::view-transition-old(*),
+	::view-transition-new(*) {
+		animation: none !important;
+	}
+}

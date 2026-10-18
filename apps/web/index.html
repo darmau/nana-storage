@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<meta name="referrer" content="no-referrer" />
+		<meta name="robots" content="noindex, nofollow" />
+		<meta name="theme-color" content="#fafaf8" media="(prefers-color-scheme: light)" />
+		<meta name="theme-color" content="#0e0f11" media="(prefers-color-scheme: dark)" />
+		<meta name="color-scheme" content="light dark" />
+		<!-- 外观设置：必须在 theme-color 之后、同步执行 -->
+		<script src="/theme.js"></script>
+		<title>那时</title>
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<!-- 所有静态资源都要鉴权：manifest 默认不带 Cookie，必须 use-credentials，否则会被 Access 拦下 -->
+		<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+		<!-- iOS 主屏幕：不读 manifest 的图标和名称 -->
+		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-title" content="那时" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+		<meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
+	</head>
+	<body>
+		<div id="root"></div>
+		<script type="module" src="/src/main.tsx"></script>
+	</body>
+</html>

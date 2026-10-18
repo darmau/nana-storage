@@ -1,0 +1,6 @@
+# 复制为 .dev.vars（已在 .gitignore 中）。本地 wrangler dev 用 wrangler.jsonc 里的 access.dev 模拟身份。
+# OWNER_EMAIL 必须和 access.dev.identity.email（dev@example.com）一致，否则所有请求都是 403。
+ACCESS_TEAM_DOMAIN=https://dev.cloudflareaccess.com
+ACCESS_AUD=dev-aud
+OWNER_EMAIL=dev@example.com
+APP_ORIGIN=http://localhost:8787

@@ -1,0 +1,191 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "nana-storage",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-10-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	// 部署版本号：列表接口的 ETag 带上它，新代码改了返回格式时浏览器不会拿到旧格式的缓存（src/dbcache.ts）
+	"version_metadata": {
+		"binding": "CF_VERSION_METADATA"
+	},
+	// ---- 入口：只允许自定义域名。workers.dev 与预览 URL 全部关闭，避免绕过 Access。
+	"workers_dev": false,
+	"preview_urls": false,
+	// 这是模板，部署者不需要改它（改了以后同步上游会冲突）。
+	// 域名（routes、APP_ORIGIN）和 D1 / KV 的 ID 由 scripts/render-wrangler.mjs 在部署时填进
+	// wrangler.deploy.json：域名来自构建环境变量 NANA_DOMAIN，资源 ID 按名字向 Cloudflare 查。见 docs/deploy.md。
+	// ---- SPA 静态资源：所有请求先经过 Worker（鉴权 + 安全头），再交给资源服务。
+	"assets": {
+		"directory": "../web/dist",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": true
+	},
+	"vars": {
+		// 本地开发的默认值；部署时换成 https://<NANA_DOMAIN>
+		"APP_ORIGIN": "http://localhost:8787"
+	},
+	// ---- 身份信息是 secret，不进仓库（pnpm run setup 写入，部署不会覆盖）。
+	//   ACCESS_TEAM_DOMAIN  https://<团队名>.cloudflareaccess.com
+	//   ACCESS_AUD          Zero Trust 里 Access 应用的 AUD 标签
+	//   OWNER_EMAIL         唯一允许访问的邮箱
+	// 缺少任何一个身份相关的 secret 时，所有请求都返回 403。
+	"secrets": {
+		"required": [
+			"ACCESS_TEAM_DOMAIN",
+			"ACCESS_AUD",
+			"OWNER_EMAIL"
+		]
+	},
+	// 资源 ID 按名字在部署时查（render-wrangler.mjs），模板里不写。创建方法见 docs/deploy.md（pnpm run setup）。
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "nana-db",
+			"migrations_dir": "./migrations"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "PHOTOS",
+			"bucket_name": "nana-photos"
+		}
+	],
+	// 相似照片的近邻索引（512 维，cosine）。只存 asset_id 和向量，不存任何元数据；真实数据在 D1 的 asset_fp，可以随时重建。
+	// 本地没有模拟：wrangler dev 时相似功能返回空（不连线上索引，也不要用 --remote）。
+	"vectorize": [
+		{
+			"binding": "EMBED_INDEX",
+			"index_name": "nana-embed"
+		},
+		// 人脸向量（512 维，cosine），用来把同一个人的脸归到一起（src/people.ts）。同样只存 face_id 和向量，真实数据在 D1 的 faces。
+		{
+			"binding": "FACE_INDEX",
+			"index_name": "nana-faces"
+		}
+	],
+	// KV 的名字是 nana-kv（render-wrangler.mjs 按它查 ID）。
+	"kv_namespaces": [
+		{
+			"binding": "KV"
+		}
+	],
+	// ---- 队列：批量压到最小；死信队列不配消费者，只供人工查看。
+	//   max_concurrency = PROCESSOR_POOL_SIZE（32）：真正同时用容器的只有 limits.processors 个（默认 4），
+	//     由 UsageGuard 分配槽位，其余消费者在 UsageGuard 里等（最多 SLOT_WAIT_MS，不轮询、不耗 CPU），
+	//     等不到就 busy，消息延迟 60 秒后重投。
+	//   max_retries 100（平台上限）：任务本身失败最多重试 2 次（MAX_JOB_ATTEMPTS 在 D1 里记），其余留给 busy 和 recheck。
+	//     以前是 5：积压几千个任务时，排在后面的消息等槽位就耗光了次数、进死信队列，任务永远停在 pending。
+	//     重投不启动容器（容器次数只受 D1 的 attempts 限制），只多一次 D1 读取 + 一两次 UsageGuard 请求。
+	//     busy 的重投总量和积压量无关：同时最多 32 个消费者在等，每次等 5 分钟 + 延迟 60 秒，
+	//     所以全天最多约 32 × 240 ≈ 7700 次（约 2.3 万次队列操作，在免费额度内）。
+	//     recheck（任务正在运行时收到消息）每条消息最多几次：任务要么结束，要么 20 分钟后算卡住被重新认领（最多 3 次）。
+	"queues": {
+		"producers": [
+			{
+				"binding": "JOBS",
+				"queue": "nana-jobs"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "nana-jobs",
+				"max_batch_size": 1,
+				"max_batch_timeout": 5,
+				"max_retries": 100,
+				"max_concurrency": 32,
+				"retry_delay": 60,
+				"dead_letter_queue": "nana-jobs-dlq"
+			}
+		]
+	},
+	// ---- Durable Objects：
+	//   Processor —— 每个实例挂一个容器。DO 管理的容器不支持 max_instances，
+	//                 所以上限靠：Worker 只使用固定的 PROCESSOR_POOL_SIZE（32）个名字，
+	//                 且 Processor 在启动容器前校验自己是否是这几个名字之一；
+	//                 平时同时只用 limits.processors 个（默认 4，UsageGuard 分配槽位）。
+	//   UsageGuard —— 单例，每日用量记账 + 熔断。两者都不使用 alarm。
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "PROCESSOR",
+				"class_name": "Processor"
+			},
+			{
+				"name": "USAGE_GUARD",
+				"class_name": "UsageGuard"
+			}
+		]
+	},
+	"exports": {
+		"Processor": {
+			"type": "durable-object",
+			"storage": "sqlite",
+			"container": "processor"
+		},
+		"UsageGuard": {
+			"type": "durable-object",
+			"storage": "sqlite"
+		}
+	},
+	"containers": [
+		{
+			"name": "processor",
+			"class_name": "Processor",
+			"scheduling_policy": "durable_object",
+			"images": {
+				"base": {
+					"dockerfile": "../processor/Dockerfile",
+					"build_context": "../processor"
+				}
+			}
+		}
+	],
+	// ---- 已登录 API 的速率上限（防止自己的前端 bug 失控）。
+	//   API_LIMITER  3000/分钟：首次导入 20 万张约需 80 万次请求；全天跑满约 430 万次 ≈ $1.3/天。
+	//   FILE_LIMITER 6000/分钟：只用于 GET /api/a/*（缩略图等）和地图的瓦片、字体、图标。快速滚动/拖动时间线一分钟会加载几千张缩略图；
+	//                全天跑满约 860 万次 ≈ Workers $2.6 + R2 读取 $3.1 ≈ $5.7/天（不熔断，靠这个上限封顶）。
+	"ratelimits": [
+		{
+			"name": "API_LIMITER",
+			"namespace_id": "1001",
+			"simple": {
+				"limit": 3000,
+				"period": 60
+			}
+		},
+		{
+			"name": "FILE_LIMITER",
+			"namespace_id": "1002",
+			"simple": {
+				"limit": 6000,
+				"period": 60
+			}
+		}
+	],
+	// 每小时一次（补写向量、更新主题、识别推迟的人脸、设备消失后补发）；回收站清理每天一次（03:17 UTC）。
+	"triggers": {
+		"crons": [
+			"7 * * * *",
+			"17 3 * * *"
+		]
+	},
+	"limits": {
+		"cpu_ms": 30000
+	},
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 0.2
+	},
+	// 本地开发模拟 Access 身份（只在 wrangler dev 生效）。
+	"access": {
+		"dev": {
+			"aud": "dev-aud",
+			"identity": {
+				"email": "dev@example.com"
+			}
+		}
+	}
+}

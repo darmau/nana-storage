@@ -1,0 +1,40 @@
+import { Link } from "@tanstack/react-router";
+import { t } from "../i18n";
+import { StorageMeter } from "../library/StorageMeter";
+import { IconDuplicate, IconFolder, IconHeart, IconPeople, IconTrash } from "../ui/icons";
+import { useDocumentTitle } from "../ui/title";
+
+/** 资料库首页（移动端底部“资料库”标签的落点；桌面端这些入口在侧边栏里）。相册（包括主题）有自己的标签，不在这里重复。 */
+export function LibraryHome() {
+	useDocumentTitle(t.nav.library);
+	const quick =
+		"flex min-h-20 flex-col items-start justify-center gap-2 rounded-2xl border border-border bg-card px-4 text-sm font-semibold hover:bg-surface sm:min-h-14 sm:flex-row sm:items-center sm:justify-start sm:gap-3";
+	return (
+		<div className="space-y-7">
+			<h1 className="page-title pt-1">{t.nav.library}</h1>
+			<div className="grid grid-cols-3 gap-2">
+				<Link to="/favorites" className={quick}>
+					<IconHeart className="text-[#c0392b] dark:text-[#f28b82]" />
+					{t.favorites.title}
+				</Link>
+				<Link to="/folders/$folderId" params={{ folderId: "root" }} className={quick}>
+					<IconFolder className="text-[#b7791f] dark:text-[#f2c66d]" />
+					{t.folders.title}
+				</Link>
+				<Link to="/trash" className={quick}>
+					<IconTrash className="text-danger" />
+					{t.trash.title}
+				</Link>
+				<Link to="/people" className={quick}>
+					<IconPeople className="text-accent" />
+					{t.people.title}
+				</Link>
+				<Link to="/duplicates" className={quick}>
+					<IconDuplicate className="text-muted" />
+					{t.duplicates.title}
+				</Link>
+			</div>
+			<StorageMeter className="border border-border bg-card" />
+		</div>
+	);
+}
