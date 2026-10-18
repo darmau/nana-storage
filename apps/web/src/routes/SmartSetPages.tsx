@@ -204,7 +204,8 @@ export function SmartSetPage() {
 					) : (
 						<span className="font-medium">{t.topics.scopeAll}</span>
 					)}
-					<button className={chip(false)} disabled={busy} onClick={() => setScoping(true)}>
+					{/* 正在更新时也能改：服务端照样保存范围，标记为需要更新（页头会提示） */}
+					<button className={`${chip(false)} disabled:opacity-50`} disabled={rescope.isPending} onClick={() => setScoping(true)}>
 						{rescope.isPending ? t.topics.scopeSaving : t.topics.scopeEdit}
 					</button>
 				</div>
