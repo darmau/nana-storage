@@ -1,6 +1,7 @@
 import type { CropBox } from "@nana/shared";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { api, errorText } from "../api";
 import { batch, invalidateLibrary } from "../library/actions";
 import { t } from "../i18n";
@@ -49,7 +50,7 @@ import type { AssetDetail } from "./types";
  *    屏幕需要更多像素（高分屏全屏或放大）时再叠上原图。
  *  - “加载原图”：浏览器能解码的原件直接叠上去；解不了的（非 Safari 的 HEIC、RAW 等）请服务端按原图分辨率重新生成预览，
  *    生成好再叠上去。预览已经是原图分辨率时只提示“已经是最高清”。原图模式（顶栏开关）下停留一会儿就自动加载。
- *  - Live Photo：打开时静音播放一次，之后悬停（桌面）或按住（触屏）再播放。顶栏开关可以关掉自动播放（这台设备的偏好），
+ *  - Live Photo：打开时播放一次（带声音，浏览器不允许时静音），之后悬停（桌面）或按住（触屏）再播放。顶栏开关可以关掉自动播放（这台设备的偏好），
  *    关掉后只在点 / 按住 Live 按钮时播放。
  *  - 视频：能解码 HEVC 的浏览器播原件，否则播 H.264 预览，出错就换下一个来源。
  *  - ←/→ 或左右滑动切换（跨月/跨页自动加载），并按上次切换的方向预加载前方两张，Esc 或下滑关闭，i 打开信息，f 收藏，e 编辑，双击放大。
@@ -467,7 +468,8 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 						{kind === KIND_LIVE && (
 							<LiveButton
 								autoplay={liveAutoplay}
-								onPlay={() => setLivePlay((n) => n + 1)}
+								// 同步渲染：Still 的 useLayoutEffect 在这次点击里调用 play()，浏览器才允许有声播放（iOS Safari 只认点击当时）
+								onPlay={() => flushSync(() => setLivePlay((n) => n + 1))}
 								onToggle={() => {
 									setLiveAutoplay(!liveAutoplay);
 									say(liveAutoplay ? t.viewer.liveAutoplayTurnedOff : t.viewer.liveAutoplayTurnedOn);
@@ -720,14 +722,18 @@ function Still({
 	const [srcIndex, setSrcIndex] = useState(0);
 	const previewRef = useRef<HTMLImageElement>(null);
 
+	// 带声音播放；浏览器不允许（没有刚发生的点击，比如 iOS 上打开时的自动播放）就静音播放
 	const play = () => {
 		const v = videoRef.current;
 		if (!v) return;
 		v.currentTime = 0;
-		void v.play().then(
-			() => setPlaying(true),
-			() => setPlaying(false),
-		);
+		v.muted = false;
+		const shown = () => setPlaying(true);
+		void v.play().then(shown, (e: unknown) => {
+			if (!(e instanceof DOMException && e.name === "NotAllowedError")) return setPlaying(false);
+			v.muted = true;
+			void v.play().then(shown, () => setPlaying(false));
+		});
 	};
 
 	// 浏览器内存里已经有这张预览（预加载还没解码完之类），绘制前就标记为已加载，缩略图不会露出来
@@ -743,7 +749,7 @@ function Still({
 	}, [live?.id, sources.length]);
 	// 点了顶栏的 Live 按钮（换照片时重新挂载，挂载那一刻的计数不算）
 	const mountNonce = useRef(playNonce);
-	useEffect(() => {
+	useLayoutEffect(() => {
 		if (playNonce !== mountNonce.current) play();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [playNonce]);
@@ -817,7 +823,6 @@ function Still({
 						<video
 							ref={videoRef}
 							src={sources[srcIndex]}
-							muted
 							playsInline
 							preload="auto"
 							onEnded={() => setPlaying(false)}

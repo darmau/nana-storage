@@ -20,7 +20,7 @@ It stays smooth with tens of thousands of photos: only what's near the screen is
 Click any photo to open the viewer:
 
 - It shows the preview first (3840 px on the long edge, enough for 4K). When you zoom past what the preview can show, the original is layered on top after a moment.
-- **Live Photos** play once, muted, when opened, and again on hover. The Live button at the top left plays it; long-press (or right-click) toggles autoplay.
+- **Live Photos** play once when opened, and again on hover, with sound (muted if the browser blocks autoplay with sound; the Live button always plays with sound). The Live button at the top left plays it; long-press (or right-click) toggles autoplay.
 - **Videos** play the original when the browser can decode HEVC, otherwise the transcoded H.264 version.
 - Click the photo to hide all controls (immersive mode), click again to bring them back; double-click to zoom.
 
