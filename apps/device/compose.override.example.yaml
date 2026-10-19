@@ -5,4 +5,4 @@ services:
   device:
     volumes:
       - /Users/me/Pictures/Export:/local/export:ro
-      - /Volumes/NAS/Photos:/local/nas:ro
+      - /Volumes/PSSD:/local/nas:ro

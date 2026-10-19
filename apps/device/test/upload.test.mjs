@@ -152,6 +152,31 @@ test("asks the page to wait when staging is full, but always takes one file", as
 	assert.equal(u.summary().stagedBytes, big);
 });
 
+test("evicts the oldest files waiting for local processing instead of making the page wait", async () => {
+	let t = 1000;
+	const { u, dir } = await setup({ attached: true, now: () => t });
+	const files = [file("a.jpg", "aaaa"), file("b.jpg", "bbbbb")];
+	const { first } = u.start({ session: "s", files });
+	assert.equal(u.next("s").index, first);
+	await u.receive(first, Readable.from([Buffer.from("aaaa")]));
+	await settle(u);
+	t += 1000;
+	assert.equal(u.next("s").index, first + 1);
+	await u.receive(first + 1, Readable.from([Buffer.from("bbbbb")]));
+	await settle(u);
+	assert.equal(u.summary().waitingForProcessing, 2);
+
+	const big = STAGE_MAX_BYTES - 6;
+	const { first: f2 } = u.start({ session: "s", files: [{ name: "v.mov", relativePath: "v.mov", size: big }] });
+	assert.equal(u.next("s").index, f2, "no wait: oldest waiting file evicted");
+	assert.equal(u.summary().waitingForProcessing, 1);
+	assert.equal(u.candidates("a.jpg", 4).length, 0, "the older one went first");
+	assert.equal(u.candidates("b.jpg", 5).length, 1);
+	assert.equal(u.summary().stagedBytes, 5 + big);
+	await new Promise((r) => setTimeout(r, 10));
+	assert.deepEqual(await readdir(dir), [String(first + 1)]);
+});
+
 test("rejects a file whose size doesn't match the manifest, and gives up after three tries", async () => {
 	const { u, dir } = await setup();
 	u.start({ session: "s", files: [file("d.jpg", "12345")] });

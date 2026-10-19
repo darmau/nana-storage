@@ -15,8 +15,9 @@ import { ApiError, AuthError } from "./client.mjs";
  * 通过 candidates() 找到它（同样按大小 + sha256 核对，服务器再核对一次 R2 上的那份），复制走之后 used() 立即删掉。
  * 没有接管（云端处理）时，上传完就删。
  *
- * 磁盘上限：暂存的文件（还没上传 + 上传完等着处理的）不超过 STAGE_MAX_BYTES / STAGE_MAX_GROUPS，满了浏览器就等
- * （next() 返回 wait），处理腾出空间后继续；等处理的暂存文件 STAGED_TTL_MS 后过期删除（任务照常下载原图）。
+ * 磁盘上限：暂存的文件（还没上传 + 上传完等着处理的）不超过 STAGE_MAX_BYTES / STAGE_MAX_GROUPS。满了先删掉最早的
+ * 等处理的暂存文件（那些任务照常下载原图），上传不被本机处理的速度拖住；只有还没上传完的就占满时浏览器才等
+ * （next() 返回 wait）。等处理的暂存文件 STAGED_TTL_MS 后也会过期删除。
  * 单个文件比上限还大时，只在暂存为空时接收。
  *
  * 浏览器只负责读文件：网页关掉后剩下的文件就收不到了（文件句柄在网页里），界面提示重新选择或者取消。
@@ -25,8 +26,8 @@ import { ApiError, AuthError } from "./client.mjs";
 
 export const STAGE_MAX_BYTES = 4 * 1024 ** 3;
 export const STAGE_MAX_GROUPS = 32;
-/** 同时往服务器上传几个条目（每个条目的分块按顺序传）。 */
-const UPLOAD_CONCURRENCY = 2;
+/** 同时往服务器上传几个条目（每个条目的分块按顺序传），和网页上传相同。每个条目最多占一个分块的内存（20 MB）。 */
+const UPLOAD_CONCURRENCY = 6;
 /** 浏览器推文件时连续这么久收不到数据就放弃这次（NAS / 网络盘卡住），文件退回等待。 */
 export const RECEIVE_IDLE_MS = 60_000;
 /** 每个文件最多接收几次（浏览器读不出来、大小不对）。 */
@@ -137,7 +138,7 @@ export class Uploads {
 				continue;
 			}
 			const f = pending[0];
-			if (!this.#fits(f.size, item)) return { wait: 2000 };
+			if (!this.#fits(f.size, item) && !this.#evictReady(f.size, item)) return { wait: 2000 };
 			f.inflight = true;
 			this.stagedBytes += f.size;
 			return { index: f.index, size: f.size };
@@ -152,6 +153,22 @@ export class Uploads {
 		const groups = this.items.filter((i) => i.status === "staged" || i.status === "uploading").length + this.#readyGroups();
 		if (!started && groups >= STAGE_MAX_GROUPS) return false;
 		return this.stagedBytes + size <= STAGE_MAX_BYTES;
+	}
+
+	/**
+	 * 删掉最早的等处理的暂存文件，直到放得下这个文件。那些任务认领时找不到暂存文件，照常下载原图。
+	 * 正在被 fromLocal 复制的那份删掉后复制失败，同样退回下载。返回最后是否放得下。
+	 */
+	#evictReady(size, item) {
+		const all = [...this.ready.values()].flat().sort((a, b) => a.expires - b.expires);
+		for (const r of all) {
+			const list = this.ready.get(r.entry.size);
+			list.splice(list.indexOf(r), 1);
+			if (!list.length) this.ready.delete(r.entry.size);
+			void this.#release(r);
+			if (this.#fits(size, item)) return true;
+		}
+		return false;
 	}
 
 	#readyGroups() {
