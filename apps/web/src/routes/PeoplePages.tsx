@@ -13,6 +13,7 @@ import { alertDialog, confirmDialog } from "../ui/confirm";
 import { type MenuItem, openContextMenu } from "../ui/ContextMenu";
 import { IconCheck, IconChevronRight, IconEdit, IconEyeOff, IconHeart, IconMerge, IconPeople } from "../ui/icons";
 import { PageActions, SlideshowButton } from "./LibraryPages";
+import { PeopleSkeleton } from "../ui/Skeleton";
 import { useDocumentTitle } from "../ui/title";
 
 /** 人物的通用操作（列表的右键菜单和人物页的页头共用）。 */
@@ -132,6 +133,7 @@ export function PeoplePage() {
 				)}
 			</div>
 			{error && <p className="text-danger">{t.common.loadFailed(errorText(error))}</p>}
+			{!data && !error && <PeopleSkeleton />}
 			{data && !data.items.length && (
 				<div className="space-y-2 py-16 text-center text-sm text-muted">
 					{showHidden ? (

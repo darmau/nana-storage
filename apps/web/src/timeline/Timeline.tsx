@@ -11,6 +11,7 @@ import { Scrubber } from "./Scrubber";
 import { type Bucket, idsOf } from "./types";
 import { useWidth } from "./useWidth";
 import { t } from "../i18n";
+import { TimelineSkeleton } from "../ui/Skeleton";
 
 /**
  * Shift 范围选择可能跨月（连拍封面代表整组，结果里展开成整组的 id）：从起点所在的月份一路取到终点所在的月份。
@@ -99,6 +100,7 @@ export function Timeline({ onOpen }: { onOpen: (id: string, month: string) => vo
 
 	return (
 		<>
+			{isLoading && <TimelineSkeleton />}
 			<div
 				id="timeline"
 				ref={listRef}

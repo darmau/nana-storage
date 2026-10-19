@@ -1,9 +1,10 @@
 import { Link, Outlet, createRootRoute, createRoute, createRouter, redirect, useRouterState } from "@tanstack/react-router";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { t } from "./i18n";
 import { ContextMenuHost, openMenuAt } from "./ui/ContextMenu";
 import { pageTransition } from "./ui/motion";
 import { PullToRefresh } from "./ui/PullToRefresh";
+import { hideSplash } from "./ui/splash";
 import { ConnectionBanner } from "./routes/ConnectionBanner";
 import { GuardBanner } from "./routes/GuardBanner";
 import { BurstPage } from "./routes/BurstPage";
@@ -65,6 +66,8 @@ function Layout() {
 		openMenuAt(e.currentTarget, uploadMenuItems(uploadTarget, uploadTarget ? "folder" : "none"));
 	// 上传在后台进行，切换页面不受影响；顶栏按钮显示进度
 	const uploadPct = useUploadProgress();
+	// 外壳已经画出来了：撤掉 index.html 的启动画面，之后由各页的骨架屏接手
+	useEffect(hideSplash, []);
 
 	return (
 		<div className="min-h-dvh">

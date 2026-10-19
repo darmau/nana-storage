@@ -12,6 +12,7 @@ export const zhCN = {
 	common: {
 		ok: "确定",
 		cancel: "取消",
+		loading: "加载中",
 		gotIt: "知道了",
 		close: "关闭",
 		create: "新建",

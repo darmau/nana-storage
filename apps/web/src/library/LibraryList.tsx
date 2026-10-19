@@ -12,6 +12,7 @@ import { AssetActionsProvider, type BarContext, SelectionBar } from "./Selection
 import { SelectionProvider } from "./selection";
 import { type TileMark, TileMarks } from "./Tile";
 import { t } from "../i18n";
+import { GridSkeleton } from "../ui/Skeleton";
 
 /** 文件夹/相册/收藏/回收站共用：网格 + 多选操作栏 + 查看器（?a=）。 */
 export function LibraryList({
@@ -83,7 +84,9 @@ export function LibraryList({
 	return (
 		<SelectionProvider>
 			<AssetActionsProvider context={context}>
-				{query.isSuccess && items.length === 0 ? (
+				{query.isPending ? (
+					<GridSkeleton view={view} />
+				) : query.isSuccess && items.length === 0 ? (
 					empty != null && <div className="py-16 text-center text-sm text-muted">{empty}</div>
 				) : view === "list" ? (
 					<AssetRows

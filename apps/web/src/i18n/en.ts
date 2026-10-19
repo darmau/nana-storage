@@ -19,6 +19,7 @@ export const en: Messages = {
 	common: {
 		ok: "OK",
 		cancel: "Cancel",
+		loading: "Loading",
 		gotIt: "Got it",
 		close: "Close",
 		create: "Create",

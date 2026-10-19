@@ -41,6 +41,7 @@ import { uploadMenuItems } from "../upload/picker";
 import { Slideshow } from "../viewer/Slideshow";
 import { type FolderView, setFolderView, useFolderView } from "../ui/folderView";
 import { useDocumentTitle } from "../ui/title";
+import { AlbumCardsSkeleton, FolderCardsSkeleton, FolderRowsSkeleton } from "../ui/Skeleton";
 import { fmtNumber } from "../i18n/format";
 import { formatBytes, formatDateTime } from "../timeline/format";
 
@@ -360,6 +361,8 @@ export function FoldersPage() {
 			<FolderPeople folderId={folderId} value={person} onChange={setPerson} />
 			<TypeFilter value={type} onChange={setType} />
 			{err && <p className="text-sm text-danger">{err}</p>}
+			{/* 子文件夹的骨架只在根目录显示：下层大多没有子文件夹，先画出卡片再消失反而跳一下（照片网格有自己的骨架） */}
+			{!data && folderId === "root" && (view === "list" ? <FolderRowsSkeleton /> : <FolderCardsSkeleton />)}
 			{!!data?.children.length && view === "list" && <FolderRows folders={data.children} unfinishedIn={unfinishedIn} onMenu={folderMenu} />}
 			{!!data?.children.length && view === "grid" && (
 				<ul className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7">
@@ -545,7 +548,7 @@ export function AlbumsPage() {
 				{data?.length === 0 && (
 					<p className="py-12 text-center text-sm text-muted">{t.albums.none}</p>
 				)}
-				<AlbumGrid albums={data} />
+				{data ? <AlbumGrid albums={data} /> : <AlbumCardsSkeleton />}
 			</section>
 		</div>
 	);

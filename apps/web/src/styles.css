@@ -184,6 +184,77 @@ html.has-scrubber main {
 }
 
 /*
+ * 骨架屏（ui/Skeleton.tsx）：延迟 150ms 才淡入（请求很快、缓存命中时不闪），之后只做 opacity 的呼吸。
+ * 照片网格的占位底部渐隐，不让一块硬边的格子图案显得像已经到底。
+ */
+.skeleton {
+	animation:
+		fade-in 200ms 150ms ease-out both,
+		skeleton-pulse 1.6s 350ms ease-in-out infinite;
+}
+@keyframes skeleton-pulse {
+	50% {
+		opacity: 0.55;
+	}
+}
+.skeleton-fade {
+	mask-image: linear-gradient(#000 55%, transparent);
+}
+
+/*
+ * 启动画面（index.html 的 #splash）：JS 还没下载、执行完之前只有它。在 #root 外面、盖住整页，
+ * 外壳第一次渲染后由 ui/splash.ts 淡出移除，之后由各页的骨架屏接手。
+ * 从主屏幕打开（独立窗口）时立即显示；普通标签页里延迟 300ms 才显示，刷新时不闪一下 Logo。
+ */
+.app-splash {
+	position: fixed;
+	inset: 0;
+	z-index: 100;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 28px;
+	background: var(--bg);
+	animation: fade-in 200ms 300ms ease-out both;
+}
+.app-splash rect {
+	fill: var(--fg);
+}
+.app-splash g {
+	stroke: var(--bg);
+}
+.app-splash-bar {
+	position: relative;
+	width: 72px;
+	height: 3px;
+	overflow: hidden;
+	border-radius: 999px;
+	background: var(--surface);
+}
+.app-splash-bar::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	width: 40%;
+	border-radius: inherit;
+	background: var(--muted);
+	animation: splash-bar 1.1s ease-in-out infinite;
+}
+@keyframes splash-bar {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(250%);
+	}
+}
+.app-splash-out {
+	animation: fade-out 200ms ease-out both;
+	pointer-events: none;
+}
+
+/*
  * 从主屏幕打开（独立窗口）时更像原生 App：
  *  - 页面滚到头不回弹、不触发系统的下拉刷新（改用 ui/PullToRefresh.tsx 自己的下拉刷新）；
  *  - 长按链接不弹出系统的链接预览菜单。
@@ -195,6 +266,11 @@ html.has-scrubber main {
 	}
 	a {
 		-webkit-touch-callout: none;
+	}
+}
+@media (display-mode: standalone) {
+	.app-splash:not(.app-splash-out) {
+		animation: none;
 	}
 }
 
@@ -440,7 +516,11 @@ html:active-view-transition-type(page-fade) {
 	.sheet-in,
 	.bar-in,
 	.panel-in,
-	.tab-pill-in {
+	.tab-pill-in,
+	.skeleton,
+	.app-splash,
+	.app-splash-out,
+	.app-splash-bar::after {
 		animation: none;
 	}
 	::view-transition-group(*),
