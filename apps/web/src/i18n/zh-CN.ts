@@ -669,9 +669,6 @@ export const zhCN = {
 	},
 	explore: {
 		all: "全部",
-		recent: "最近查看",
-		mostViewed: "最常查看",
-		localOnly: "只记在这台设备上",
 		byType: "按类型",
 		more: "更多",
 		mapSub: "按拍摄地点浏览",

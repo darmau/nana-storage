@@ -8,12 +8,8 @@ import { LibraryList } from "../library/LibraryList";
 import { smartSetsQuery } from "../library/queries";
 import { ASSET_TYPE_LABELS } from "../library/TypeFilter";
 import { FaceAvatar, peopleQuery, personName } from "../people/model";
-import { KIND_VIDEO, thumbUrl, type TimelineItem } from "../timeline/types";
-import { IconChart, IconChevronRight, IconClose, IconDuplicate, IconHeart, IconMap, IconPlay, IconSearch, IconSimilar } from "../ui/icons";
-import { forgetView, mostViewed, recentViews } from "../ui/recent";
+import { IconChart, IconChevronRight, IconClose, IconDuplicate, IconHeart, IconMap, IconSearch, IconSimilar } from "../ui/icons";
 import { useDocumentTitle } from "../ui/title";
-import { listNav } from "../viewer/sequence";
-import { Viewer } from "../viewer/Viewer";
 import { Cover } from "./LibraryPages";
 import { smartSetLine } from "./SmartSetPages";
 
@@ -91,7 +87,7 @@ export function SearchBox({ className = "", autoFocus }: { className?: string; a
 }
 
 /**
- * 探索：没有搜索词、没有筛选时是入口页（人物、主题、最近查看 / 最常查看、地图和重复照片、按类型）；
+ * 探索：没有搜索词、没有筛选时是入口页（人物、主题、地图、重复照片和统计数据、按类型）；
  * 输入关键词或选了筛选条件就显示搜索结果。搜索的是文件名和描述，加上日期、类型、收藏、相机筛选。
  */
 export function SearchPage() {
@@ -194,13 +190,12 @@ export function SearchPage() {
 	);
 }
 
-/** 没有搜索时的入口。人物、主题和列表页共用缓存（带 ETag），最近查看只读本机记录，不额外请求。 */
+/** 没有搜索时的入口。人物、主题和列表页共用缓存（带 ETag），不额外请求。 */
 function ExploreHome({ onType }: { onType: (type: AssetType) => void }) {
 	return (
 		<div className="space-y-8">
 			<PeopleStrip />
 			<SmartSetStrip />
-			<ViewedStrips />
 			<section className="space-y-3">
 				<h2 className="text-lg font-bold">{t.explore.more}</h2>
 				<div className="grid gap-2 sm:grid-cols-2">
@@ -228,11 +223,10 @@ function ExploreHome({ onType }: { onType: (type: AssetType) => void }) {
 	);
 }
 
-function SectionHead({ title, to, sub }: { title: string; to?: "/people" | "/smart-sets"; sub?: string }) {
+function SectionHead({ title, to }: { title: string; to?: "/people" | "/smart-sets" }) {
 	return (
 		<div className="flex items-baseline gap-2">
 			<h2 className="text-lg font-bold">{title}</h2>
-			{sub && <span className="truncate text-xs text-muted">{sub}</span>}
 			{to && (
 				<Link to={to} className="ml-auto flex shrink-0 items-center gap-0.5 self-center rounded-full px-2 py-1 text-sm font-medium text-accent-ink hover:bg-surface">
 					{t.explore.all}
@@ -302,88 +296,6 @@ function SmartSetStrip() {
 					))}
 				</div>
 			)}
-		</section>
-	);
-}
-
-/** 每条最多显示这么多张 */
-const VIEWED_LIMIT = 24;
-
-/**
- * 最近查看 / 最常查看（本机记录，见 ui/recent.ts）。点开时把当前这条列表定下来给查看器翻页：
- * 查看器每打开一张都会更新记录，列表要是跟着变，前后张就乱了。关闭查看器后再重新读。
- */
-function ViewedStrips() {
-	const { a } = useSearch({ strict: false }) as { a?: string };
-	const navigate = useNavigate();
-	// 关闭查看器（a 变回空）时重新读本机记录
-	const [lists, setLists] = useState(() => ({ recent: recentViews(VIEWED_LIMIT), most: mostViewed(VIEWED_LIMIT) }));
-	const reload = useCallback(() => setLists({ recent: recentViews(VIEWED_LIMIT), most: mostViewed(VIEWED_LIMIT) }), []);
-	useEffect(() => {
-		if (!a) reload();
-	}, [a, reload]);
-	const [opened, setOpened] = useState<TimelineItem[] | null>(null);
-	const openedHere = useRef(false);
-
-	const setA = useCallback(
-		(next: string | undefined, replace: boolean) =>
-			void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, a: next }), replace, resetScroll: false }),
-		[navigate],
-	);
-	const open = (items: TimelineItem[], id: string) => {
-		setOpened(items);
-		openedHere.current = true;
-		setA(id, false);
-	};
-	const close = useCallback(() => {
-		if (openedHere.current) {
-			openedHere.current = false;
-			window.history.back();
-		} else setA(undefined, true);
-	}, [setA]);
-	const drop = (id: string) => {
-		forgetView(id);
-		reload();
-	};
-
-	// 刷新页面后地址里还带着 ?a=：按最近查看翻页
-	const navItems = opened ?? lists.recent;
-	return (
-		<>
-			{lists.recent.length > 0 && <ThumbStrip title={t.explore.recent} items={lists.recent} onOpen={open} onBroken={drop} />}
-			{lists.most.length > 0 && <ThumbStrip title={t.explore.mostViewed} items={lists.most} onOpen={open} onBroken={drop} />}
-			{a && <Viewer id={a} nav={listNav(a, navItems, null)} onNavigate={(n) => setA(n.id, true)} onClose={close} />}
-		</>
-	);
-}
-
-function ThumbStrip({
-	title,
-	items,
-	onOpen,
-	onBroken,
-}: {
-	title: string;
-	items: TimelineItem[];
-	onOpen: (items: TimelineItem[], id: string) => void;
-	onBroken: (id: string) => void;
-}) {
-	return (
-		<section className="space-y-3">
-			<SectionHead title={title} sub={t.explore.localOnly} />
-			<div className={strip}>
-				{items.map((it) => (
-					<button
-						key={it[0]}
-						type="button"
-						className="relative h-24 w-24 shrink-0 snap-start overflow-hidden rounded-xl bg-surface transition hover:opacity-90 sm:h-28 sm:w-28"
-						onClick={() => onOpen(items, it[0])}
-					>
-						<img src={thumbUrl(it[0], it[7])} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover" onError={() => onBroken(it[0])} />
-						{it[3] === KIND_VIDEO && <IconPlay size={16} className="absolute right-1.5 top-1.5 text-white drop-shadow" />}
-					</button>
-				))}
-			</div>
 		</section>
 	);
 }

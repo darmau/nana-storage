@@ -23,7 +23,6 @@ import {
 } from "../ui/icons";
 import { confirmDialog } from "../ui/confirm";
 import { setLiveAutoplay, useLiveAutoplay } from "../ui/liveAutoplay";
-import { recordView } from "../ui/recent";
 import { useThemeColor } from "../ui/themeColor";
 import { assetFacesQuery } from "../people/model";
 import { EditPreview, type EditPreviewSpec, Editor, type EditResult } from "./Editor";
@@ -122,17 +121,6 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 
 	const kind = item?.[3] ?? (detail.data?.kind === "video" ? KIND_VIDEO : detail.data?.kind === "live" ? KIND_LIVE : 0);
 	const rev = detail.data?.derived_rev ?? item?.[7] ?? 0;
-
-	// 探索页的最近查看 / 最常查看（只记在这台设备上）。每张每次打开记一次，等详情读到再记：
-	// 从地址直接打开时列表里可能还没有这一项，详情里的版本号也是最新的
-	const recorded = useRef<string | null>(null);
-	const d = detail.data;
-	useEffect(() => {
-		if (context === "trash" || !d || d.id !== id || recorded.current === id) return;
-		recorded.current = id;
-		const [w, h] = displayDims(d) ?? [0, 0];
-		recordView([id, w, h, d.kind === "video" ? KIND_VIDEO : d.kind === "live" ? KIND_LIVE : 0, d.local_day, d.duration_ms, d.favorite ? 1 : 0, d.derived_rev]);
-	}, [id, d, context]);
 
 	// 关闭：先播淡出动画再真正关闭（浏览器后退直接卸载，不走这里）
 	const rootRef = useRef<HTMLDivElement>(null);

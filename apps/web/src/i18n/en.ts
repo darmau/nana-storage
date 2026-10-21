@@ -667,9 +667,6 @@ export const en: Messages = {
 	},
 	explore: {
 		all: "All",
-		recent: "Recently viewed",
-		mostViewed: "Most viewed",
-		localOnly: "Kept on this device only",
 		byType: "By type",
 		more: "More",
 		mapSub: "Browse by where photos were taken",
