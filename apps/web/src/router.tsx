@@ -45,9 +45,9 @@ import {
 } from "./ui/icons";
 
 /** 资料库下的页面：移动端底部的“资料库”标签在这些页面上都算选中（相册、文件夹有自己的标签）。 */
-const LIBRARY_PATHS = ["/library", "/favorites", "/trash", "/duplicates"];
-/** 探索下的页面：移动端底部的“探索”标签在这些页面上也算选中（地图在移动端从探索页进入） */
-const EXPLORE_PATHS = ["/search", "/people", "/smart-sets", "/map", "/stats"];
+const LIBRARY_PATHS = ["/library", "/favorites", "/trash"];
+/** 探索下的页面：移动端底部的“探索”标签在这些页面上也算选中（地图、重复照片、统计数据在移动端从探索页进入） */
+const EXPLORE_PATHS = ["/search", "/people", "/smart-sets", "/map", "/duplicates", "/stats"];
 const under = (pathname: string, p: string) => pathname === p || pathname.startsWith(`${p}/`);
 
 /**

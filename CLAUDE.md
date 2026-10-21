@@ -166,7 +166,7 @@
 
 - 颜色、尺寸都是 `apps/web/src/styles.css` 里的 token（`bg-bg`、`bg-card`、`text-muted`、`bg-accent`、`text-accent-fg` …），组件里不直接写色值。`@theme inline` 让 `.theme-dark` 子树（查看器）可以强制深色。
 - 布局尺寸变量：`--header-h`、`--sidebar-w`（md 以上的侧边栏）、`--tabbar-h`（移动端底部标签）。固定定位的东西（地图页、时间线拖动条、多选操作栏）都按这些变量避让。这三个变量已经包含安全区（刘海 / Home 指示条），其他贴边的元素用 `--safe-top/bottom/left/right`，不直接写 `env()`。
-- 导航：搜索框只有一个：桌面在顶栏（`SearchBox`，输入就跳到 `/search?q=`），移动端顶栏没有，放在探索页里（`md:hidden`）。侧边栏的“探索”小标题就是探索页（`/search`）的入口，下面是人物、主题（`/smart-sets`）、地图、统计数据（`/stats`）；移动端底部标签是 照片 / 相册 / 探索 / 文件夹 / 资料库：“探索”在 `/search`、`/people`、`/smart-sets`、`/map`、`/stats` 下都高亮（移动端的地图和统计数据从探索页进入），面包屑“探索 › 主题”；“文件夹”在所有 `/folders/*` 下高亮，“资料库”不再包括文件夹。
+- 导航：搜索框只有一个：桌面在顶栏（`SearchBox`，输入就跳到 `/search?q=`），移动端顶栏没有，放在探索页里（`md:hidden`）。侧边栏的“探索”小标题就是探索页（`/search`）的入口，下面是人物、主题（`/smart-sets`）、地图、统计数据（`/stats`）；移动端底部标签是 照片 / 相册 / 探索 / 文件夹 / 资料库：“探索”在 `/search`、`/people`、`/smart-sets`、`/map`、`/duplicates`、`/stats` 下都高亮（移动端的地图、重复照片和统计数据从探索页进入），面包屑“探索 › 主题”；“文件夹”在所有 `/folders/*` 下高亮。资料库首页（`routes/LibraryHome.tsx`）只放别处没有的入口：收藏、回收站和存储空间（文件夹有自己的标签，人物、重复照片在探索页里，不重复放）。
 - 探索页（`routes/SearchPage.tsx`）：没有搜索词和筛选时是入口页：人物、主题卡片（`SmartSetStrip`，不用 `ul li`，见下面的脚本钩子）、最近查看 / 最常查看、地图、重复照片和统计数据、按类型。有搜索词或筛选时显示结果。最近查看 / 最常查看只记在这台设备的 localStorage（`ui/recent.ts`，查看器每打开一张记一次，最多 200 张），不发给服务端；缩略图读不到时从记录里去掉。
 - 设置（`apps/web/src/routes/settings/`）：`SettingsLayout` 外壳 + 分页（概览 / 后台处理 / 成本防护；使用统计已搬到 `/stats`）。分页之间切换只淡入淡出（`ui/motion.ts`），不从右推入。语言是下拉框。lg 以上左侧是分页导航；窄屏时概览页就是目录，分页标题旁有返回按钮（`SettingsHeader`）。概览只在打开和点“刷新”时请求，不自动刷新。
 - 外观（跟随系统 / 浅色 / 深色）是这台设备的偏好，存在 localStorage（`ui/theme.ts`），由 `<html data-theme>` 生效；`public/theme.js` 在渲染前同步套用（CSP 不允许内联脚本），`dark:` 变体也跟着它走。新增深色相关的样式时，`styles.css` 里两处深色变量都要改。“关于”的版本号由 `vite.config.ts` 注入（`WORKERS_CI_COMMIT_SHA`，本地读 git）。
