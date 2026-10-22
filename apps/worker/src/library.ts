@@ -23,7 +23,7 @@ import { UPLOAD_ABANDONED_MS } from "./uploads";
 import { ulid } from "./ulid";
 
 /**
- * 资料库：文件夹、相册、收藏、回收站，以及批量操作。
+ * 资料库：文件夹、相册、收藏、归档、回收站，以及批量操作。
  * 列表接口都返回 { items: TimelineItem[], next: number | null }，按拍摄时间倒序，偏移量分页。
  */
 
@@ -103,6 +103,13 @@ export function typeCondition(type: AssetType | undefined): { sql: string; binds
 }
 export const andType = (t: ReturnType<typeof typeCondition>) => (t ? ` AND ${t.sql}` : "");
 
+/**
+ * 归档的照片默认不出现在文件夹和相册里，地址带 ?archived=1（页面上勾选“显示归档照片”）时才列出。
+ * 文件夹 / 相册卡片的张数、体积和封面也不算归档的。
+ */
+const NOT_ARCHIVED = "a.archived = 0";
+const andArchived = (c: Context<Bindings>) => (c.req.query("archived") === "1" ? "" : ` AND ${NOT_ARCHIVED}`);
+
 const placeholders = (n: number) => Array.from({ length: n }, () => "?").join(",");
 
 // ---------------------------------------------------------------- 文件夹
@@ -148,7 +155,7 @@ library.get("/folders/:id", async (c) => {
 			SELECT t.root, COUNT(*) AS count, SUM(a.file_size) AS size, MAX(a.updated_at) AS modified
 			-- CROSS JOIN 固定从子树出发，INDEXED BY 固定按 assets_folder_visible 读每个文件夹的照片：规划器自己选时会顺着
 			-- assets_timeline（deleted_at = NULL）每个文件夹扫一遍整个资料库（314 个文件夹 × 15 万张 = 4800 万行、26 秒）
-			FROM tree t CROSS JOIN assets a INDEXED BY assets_folder_visible ON a.folder_id = t.id AND ${VISIBLE} GROUP BY t.root
+			FROM tree t CROSS JOIN assets a INDEXED BY assets_folder_visible ON a.folder_id = t.id AND ${VISIBLE} AND ${NOT_ARCHIVED} GROUP BY t.root
 		),
 		-- 封面：每个文件夹先按 assets_folder_visible 索引取最近的 ${FOLDER_COVERS} 张，再在整棵子树里合并取前 ${FOLDER_COVERS}。
 		-- 不能写成 SELECT 列表里对 tree 的相关子查询：那样每个子文件夹都会重算一遍递归 CTE 并排序整棵子树，
@@ -156,7 +163,7 @@ library.get("/folders/:id", async (c) => {
 		cand AS (
 			SELECT t.root, j.value AS v FROM tree t, json_each((
 				SELECT json_group_array(json_array(a.taken_at, a.id || ':' || a.derived_rev)) FROM (
-					SELECT a.taken_at, a.id, a.derived_rev FROM assets a INDEXED BY assets_folder_visible WHERE a.folder_id = t.id AND ${VISIBLE}
+					SELECT a.taken_at, a.id, a.derived_rev FROM assets a INDEXED BY assets_folder_visible WHERE a.folder_id = t.id AND ${VISIBLE} AND ${NOT_ARCHIVED}
 					ORDER BY a.taken_at DESC LIMIT ${FOLDER_COVERS}) a)) j
 		),
 		ranked AS (
@@ -252,7 +259,7 @@ async function folderAssets(c: Context<Bindings>, personId: string | null) {
 			// （没有统计信息时 SQLite 会选 assets_timeline，根目录的 folder_id IS NULL 尤其如此，读完整个资料库）。
 			`SELECT ${ITEM_COLUMNS}${details ? `, ${DETAIL_COLUMNS}` : ""}
 			 FROM ${personId ? "(SELECT DISTINCT asset_id FROM faces WHERE person_id = ?) p CROSS JOIN assets a ON a.id = p.asset_id" : "assets a INDEXED BY assets_folder_visible"}
-			 WHERE ${id ? "a.folder_id = ?" : "a.folder_id IS NULL"} AND ${VISIBLE}${andType(type)}
+			 WHERE ${id ? "a.folder_id = ?" : "a.folder_id IS NULL"} AND ${VISIBLE}${andArchived(c)}${andType(type)}
 			 ORDER BY a.taken_at DESC, a.id DESC`,
 			[...(personId ? [personId] : []), ...(id ? [id] : []), ...(type?.binds ?? [])],
 			offsetOf(c.req.query("offset")),
@@ -355,19 +362,19 @@ library.get("/albums", async (c) => {
 		`WITH stats AS (
 			SELECT x.album_id, COUNT(*) AS count, SUM(a.kind = 'video') AS videos
 			-- CROSS JOIN 从相册里的照片出发按主键读；否则规划器会扫完整个资料库再逐张查它在哪些相册里
-			FROM album_assets x CROSS JOIN assets a ON a.id = x.asset_id WHERE ${VISIBLE} GROUP BY x.album_id
+			FROM album_assets x CROSS JOIN assets a ON a.id = x.asset_id WHERE ${VISIBLE} AND ${NOT_ARCHIVED} GROUP BY x.album_id
 		)
 		SELECT al.id, al.name, al.updated_at,
 			COALESCE(s.count, 0) AS count,
 			COALESCE(s.videos, 0) AS videos,
 			COALESCE(
-				(SELECT a.id || ':' || a.derived_rev FROM assets a WHERE a.id = al.cover_asset_id AND ${VISIBLE}),
+				(SELECT a.id || ':' || a.derived_rev FROM assets a WHERE a.id = al.cover_asset_id AND ${VISIBLE} AND ${NOT_ARCHIVED}),
 				(SELECT a.id || ':' || a.derived_rev FROM album_assets x JOIN assets a ON a.id = x.asset_id
-				 WHERE x.album_id = al.id AND ${VISIBLE} ORDER BY x.added_at DESC LIMIT 1)
+				 WHERE x.album_id = al.id AND ${VISIBLE} AND ${NOT_ARCHIVED} ORDER BY x.added_at DESC LIMIT 1)
 			) AS cover,
 			(SELECT json_group_array(c) FROM (
 				SELECT a.id || ':' || a.derived_rev AS c FROM album_assets x JOIN assets a ON a.id = x.asset_id
-				WHERE x.album_id = al.id AND ${VISIBLE} ORDER BY substr(a.id, 11) LIMIT ${ALBUM_SAMPLES + 1})) AS samples
+				WHERE x.album_id = al.id AND ${VISIBLE} AND ${NOT_ARCHIVED} ORDER BY substr(a.id, 11) LIMIT ${ALBUM_SAMPLES + 1})) AS samples
 		 FROM albums al LEFT JOIN stats s ON s.album_id = al.id ORDER BY al.updated_at DESC`,
 	).all<Record<string, unknown> & { count: number; videos: number; samples: string }>();
 	return c.json(
@@ -388,7 +395,7 @@ library.get("/albums/:id/assets", async (c) => {
 		await page(
 			c.env,
 			`SELECT ${ITEM_COLUMNS} FROM album_assets x JOIN assets a ON a.id = x.asset_id
-			 WHERE x.album_id = ? AND ${VISIBLE}${andType(type)} ORDER BY a.taken_at DESC, a.id DESC`,
+			 WHERE x.album_id = ? AND ${VISIBLE}${andArchived(c)}${andType(type)} ORDER BY a.taken_at DESC, a.id DESC`,
 			[c.req.param("id"), ...(type?.binds ?? [])],
 			offsetOf(c.req.query("offset")),
 			{ withMonths: true },
@@ -468,7 +475,7 @@ library.post("/albums/:id/remove", async (c) => {
 	return c.json({ removed });
 });
 
-// ---------------------------------------------------------------- 收藏 / 回收站
+// ---------------------------------------------------------------- 收藏 / 归档 / 回收站
 
 library.get("/favorites/assets", async (c) =>
 	c.json(
@@ -481,6 +488,19 @@ library.get("/favorites/assets", async (c) =>
 		),
 	),
 );
+
+library.get("/archive/assets", async (c) => {
+	const type = typeCondition(TypeParam.parse(c.req.query("type")));
+	return c.json(
+		await page(
+			c.env,
+			`SELECT ${ITEM_COLUMNS} FROM assets a WHERE a.archived = 1 AND ${VISIBLE}${andType(type)} ORDER BY a.taken_at DESC, a.id DESC`,
+			type?.binds ?? [],
+			offsetOf(c.req.query("offset")),
+			{ withMonths: true },
+		),
+	);
+});
 
 library.get("/trash/assets", async (c) =>
 	c.json(
@@ -505,6 +525,7 @@ library.post("/trash/empty", async (c) => {
 
 const BatchBody = z.discriminatedUnion("action", [
 	z.object({ action: z.literal("favorite"), ids: IDS, value: z.boolean() }),
+	z.object({ action: z.literal("archive"), ids: IDS, value: z.boolean() }),
 	z.object({ action: z.literal("trash"), ids: IDS }),
 	z.object({ action: z.literal("restore"), ids: IDS }),
 	z.object({ action: z.literal("delete-forever"), ids: IDS }),
@@ -549,11 +570,14 @@ library.post("/assets/batch", async (c) => {
 	}
 
 	// [SET 子句, SET 的参数, 额外的 WHERE 条件, WHERE 的参数]
-	// 收藏 / 回收站 / 恢复 / 移动跳过已经是目标值的行：不然每行都白写一次（还带上触发器的写入）。changed 只算真正改了的。
+	// 收藏 / 归档 / 回收站 / 恢复 / 移动跳过已经是目标值的行：不然每行都白写一次（还带上触发器的写入）。changed 只算真正改了的。
 	let update: [string, unknown[], string, unknown[]];
 	switch (body.action) {
 		case "favorite":
 			update = ["favorite = ?", [body.value ? 1 : 0], "AND favorite != ?", [body.value ? 1 : 0]];
+			break;
+		case "archive":
+			update = ["archived = ?", [body.value ? 1 : 0], "AND archived != ?", [body.value ? 1 : 0]];
 			break;
 		case "trash":
 			update = ["deleted_at = ?", [now], "AND deleted_at IS NULL", []];

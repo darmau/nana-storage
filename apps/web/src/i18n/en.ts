@@ -217,6 +217,10 @@ export const en: Messages = {
 		deleteForever: "Delete permanently",
 		favorite: "Favorite",
 		unfavorite: "Unfavorite",
+		archive: "Archive",
+		unarchive: "Unarchive",
+		archived: "Archived. Find it in Archive.",
+		unarchived: "Unarchived",
 		addToAlbum: "Add to album",
 		addToAlbumMenu: "Add to album…",
 		move: "Move",
@@ -502,6 +506,13 @@ export const en: Messages = {
 	favorites: {
 		title: "Favorites",
 		empty: "No favorite photos yet.",
+	},
+	archive: {
+		title: "Archive",
+		notice: "Archived photos are hidden from Photos, albums and folders (check “Show archived” on an album or folder to see them). They still appear in search, the map and People.",
+		empty: "No archived photos.",
+		emptyType: "No archived photos of this type.",
+		showArchived: "Show archived",
 	},
 	trash: {
 		title: "Trash",

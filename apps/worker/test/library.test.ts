@@ -206,6 +206,31 @@ describe("favorites, trash and batch", () => {
 		expect((await call("GET", "/favorites/assets")).json.items.map((i: unknown[]) => i[0])).toEqual([id(1)]);
 	});
 
+	it("archive hides from the timeline, folders and albums unless asked; unarchive brings it back", async () => {
+		const f = await call("POST", "/folders", { name: "A" });
+		await seed(1, { folder: f.json.id });
+		await seed(2, { folder: f.json.id });
+		const al = await call("POST", "/albums", { name: "旅行", assetIds: [id(1), id(2)] });
+		const r = await call("POST", "/assets/batch", { action: "archive", ids: [id(1)], value: true });
+		expect(r.json.changed).toBe(1);
+		const ids = (items: unknown[][]) => items.map((i) => i[0]);
+
+		expect(await call("GET", "/timeline/buckets").then((x) => x.json)).toEqual([{ month: "2024-05", count: 1 }]);
+		expect(ids((await call("GET", "/timeline/month/2024-05")).json)).toEqual([id(2)]);
+		expect(ids((await call("GET", `/folders/${f.json.id}/assets`)).json.items)).toEqual([id(2)]);
+		expect(ids((await call("GET", `/folders/${f.json.id}/assets?archived=1`)).json.items)).toEqual([id(2), id(1)]);
+		expect(ids((await call("GET", `/albums/${al.json.id}/assets`)).json.items)).toEqual([id(2)]);
+		expect(ids((await call("GET", `/albums/${al.json.id}/assets?archived=1`)).json.items)).toEqual([id(2), id(1)]);
+		// 卡片的张数和封面也不算归档的
+		expect((await call("GET", "/folders/root")).json.children[0]).toMatchObject({ count: 1, covers: [`${id(2)}:0`] });
+		expect((await call("GET", "/albums")).json[0]).toMatchObject({ count: 1, cover: `${id(2)}:0` });
+		expect(ids((await call("GET", "/archive/assets")).json.items)).toEqual([id(1)]);
+
+		await call("POST", "/assets/batch", { action: "archive", ids: [id(1)], value: false });
+		expect((await call("GET", "/archive/assets")).json.items).toEqual([]);
+		expect((await call("GET", "/timeline/month/2024-05")).json).toHaveLength(2);
+	});
+
 	it("trash hides from the timeline; restore brings it back", async () => {
 		await seed(1);
 		await call("POST", "/assets/batch", { action: "trash", ids: [id(1)] });

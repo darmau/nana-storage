@@ -6,10 +6,11 @@ import { t } from "../i18n";
 /** 类型的显示名称：顺序和 ASSET_TYPES 一致（媒体类型在前，照片类型在后），搜索页也用它 */
 export const ASSET_TYPE_LABELS: Record<AssetType, string> = t.library.types;
 
-/** 文件夹 / 相册页的地址参数：查看器打开的照片（?a=）和类型筛选（?type=） */
-export const listSearch = (s: Record<string, unknown>): { a?: string; type?: AssetType } => ({
+/** 文件夹 / 相册页的地址参数：查看器打开的照片（?a=）、类型筛选（?type=）和“显示归档照片”（?archived=1） */
+export const listSearch = (s: Record<string, unknown>): { a?: string; type?: AssetType; archived?: 1 } => ({
 	a: typeof s.a === "string" && /^[0-9A-Z]{26}$/.test(s.a) ? s.a : undefined,
 	type: ASSET_TYPES.includes(s.type as AssetType) ? (s.type as AssetType) : undefined,
+	archived: s.archived === 1 || s.archived === "1" ? 1 : undefined,
 });
 
 /** 文件夹页另外可以按人物筛选（?person=，只看有这个人物的脸的照片） */
@@ -42,8 +43,40 @@ export function useTypeFilter(): [AssetType | undefined, (type: AssetType | unde
 	return [type, set];
 }
 
+/** 文件夹 / 相册页是否显示归档的照片（记在地址里，和类型筛选一样替换历史记录、关掉查看器） */
+export function useShowArchived(): [boolean, (show: boolean) => void] {
+	const { archived } = useSearch({ strict: false }) as { archived?: 1 };
+	const navigate = useNavigate();
+	const set = useCallback(
+		(show: boolean) =>
+			void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, archived: show ? 1 : undefined, a: undefined }), replace: true }),
+		[navigate],
+	);
+	return [archived === 1, set];
+}
+
 /** 列表接口的地址加上类型筛选 */
 export const withType = (path: string, type: AssetType | undefined) => (type ? `${path}?type=${type}` : path);
+
+/** 列表接口的地址加上查询参数（类型筛选、显示归档、列表视图），值为空的不加 */
+export function listPath(path: string, params: { type?: AssetType; archived?: boolean; view?: "list" }) {
+	const q = new URLSearchParams();
+	if (params.type) q.set("type", params.type);
+	if (params.archived) q.set("archived", "1");
+	if (params.view) q.set("view", params.view);
+	const s = q.toString();
+	return s ? `${path}?${s}` : path;
+}
+
+/** 文件夹 / 相册页的“显示归档照片”勾选框，放在类型筛选条下面 */
+export function ShowArchivedToggle({ value, onChange }: { value: boolean; onChange: (show: boolean) => void }) {
+	return (
+		<label className="inline-flex shrink-0 cursor-pointer select-none items-center gap-2 whitespace-nowrap text-sm text-muted">
+			<input type="checkbox" className="h-4 w-4 accent-accent" checked={value} onChange={(e) => onChange(e.target.checked)} />
+			{t.archive.showArchived}
+		</label>
+	);
+}
 
 const chip = "h-8 shrink-0 rounded-full border px-3 text-sm font-medium transition";
 

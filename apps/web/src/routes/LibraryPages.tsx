@@ -7,7 +7,7 @@ import { batch, invalidateLibrary } from "../library/actions";
 import { LibraryList } from "../library/LibraryList";
 import { armLibrarySync } from "../library/sync";
 import { FolderPicker } from "../library/Pickers";
-import { TypeFilter, usePersonFilter, useTypeFilter, withType } from "../library/TypeFilter";
+import { ShowArchivedToggle, TypeFilter, listPath, usePersonFilter, useShowArchived, useTypeFilter, withType } from "../library/TypeFilter";
 import {
 	type AlbumSummary,
 	type FolderChild,
@@ -23,6 +23,7 @@ import { alertDialog, confirmDialog, promptDialog } from "../ui/confirm";
 import { type MenuItem, openContextMenu, openMenuAt } from "../ui/ContextMenu";
 import {
 	IconAlbum,
+	IconArchive,
 	IconChevronRight,
 	IconEdit,
 	IconFolder,
@@ -259,15 +260,17 @@ export function FoldersPage() {
 	useDocumentTitle(folderId === "root" ? t.folders.title : current?.name);
 	const [type, setType] = useTypeFilter();
 	const [person, setPerson] = usePersonFilter();
+	const [showArchived, setShowArchived] = useShowArchived();
 	const { data: personData } = useQuery({ ...personQuery(person ?? ""), enabled: !!person });
 	const view = useFolderView();
 	// 列表视图的接口多带文件名、大小和时间（都是 assets 自己的列），单独缓存；幻灯片和列表共用同一个 source，不会多请求。
 	// 按人物筛选走单独的路径（ETag 同时带上人物的版本）
-	const assetsPath = withType(person ? `/folders/${folderId}/people/${person}/assets` : `/folders/${folderId}/assets`, type);
+	const assetsPath = person ? `/folders/${folderId}/people/${person}/assets` : `/folders/${folderId}/assets`;
 	const source: ListSource =
 		view === "list"
-			? { key: ["folder", folderId, type, person, "list"], path: `${assetsPath}${type ? "&" : "?"}view=list` }
-			: { key: ["folder", folderId, type, person], path: assetsPath };
+			? { key: ["folder", folderId, type, person, showArchived, "list"], path: listPath(assetsPath, { type, archived: showArchived, view: "list" }) }
+			: { key: ["folder", folderId, type, person, showArchived], path: listPath(assetsPath, { type, archived: showArchived }) };
+	const listKey = `${folderId}:${type}:${person}:${showArchived}:${view}`;
 
 	const mutate = async (fn: () => Promise<unknown>) => {
 		setErr(null);
@@ -344,7 +347,7 @@ export function FoldersPage() {
 					})}
 				</nav>
 				<ViewToggle view={view} />
-				<SlideshowButton key={`${folderId}:${type}:${person}:${view}`} source={source} />
+				<SlideshowButton key={listKey} source={source} />
 				{/* 上传在顶栏的“上传”里（在文件夹页面会传到这个文件夹），这里不重复 */}
 				<PageActions
 					actions={[{ label: t.folders.newFolder, icon: <IconPlus size={18} />, onSelect: create }]}
@@ -359,7 +362,7 @@ export function FoldersPage() {
 				/>
 			</div>
 			<FolderPeople folderId={folderId} value={person} onChange={setPerson} />
-			<TypeFilter value={type} onChange={setType} />
+			<ListFilters type={type} setType={setType} showArchived={showArchived} setShowArchived={setShowArchived} />
 			{err && <p className="text-sm text-danger">{err}</p>}
 			{/* 子文件夹的骨架只在根目录显示：下层大多没有子文件夹，先画出卡片再消失反而跳一下（照片网格有自己的骨架） */}
 			{!data && folderId === "root" && (view === "list" ? <FolderRowsSkeleton /> : <FolderCardsSkeleton />)}
@@ -395,12 +398,12 @@ export function FoldersPage() {
 			)}
 			{!!pending?.items.length && <UnfinishedNotice items={pending.items} />}
 			<LibraryList
-				key={`${folderId}:${type}:${person}:${view}`}
+				key={listKey}
 				source={source}
 				view={view}
 				datedScrubber
 				// 按人物筛选时，选中照片的操作和人物页一样（“这不是 X”“这是其他人物”），直接改认错的脸
-				context={person ? { kind: "person", personId: person, name: personData?.name ?? null } : { kind: "library" }}
+				context={person ? { kind: "person", personId: person, name: personData?.name ?? null } : { kind: "library", withArchived: showArchived }}
 				// 有子文件夹时不提示，只有整个目录都是空的才说“空目录”
 				empty={person ? t.people.empty : type ? t.folders.emptyType : data?.children.length ? null : t.folders.emptyDir}
 			/>
@@ -669,7 +672,12 @@ export function AlbumPage() {
 	const qc = useQueryClient();
 	const navigate = useNavigate();
 	const [type, setType] = useTypeFilter();
-	const source: ListSource = { key: ["album", albumId, type], path: withType(`/albums/${albumId}/assets`, type) };
+	const [showArchived, setShowArchived] = useShowArchived();
+	const source: ListSource = {
+		key: ["album", albumId, type, showArchived],
+		path: listPath(`/albums/${albumId}/assets`, { type, archived: showArchived }),
+	};
+	const listKey = `${albumId}:${type}:${showArchived}`;
 	const album = useQuery({ queryKey: ["albums", albumId], queryFn: () => api<{ id: string; name: string }>(`/albums/${albumId}`) });
 	useDocumentTitle(album.data?.name);
 	const rename = async () => {
@@ -701,7 +709,7 @@ export function AlbumPage() {
 						{album.data?.name}
 					</h1>
 				</div>
-				<SlideshowButton key={`${albumId}:${type}`} source={source} />
+				<SlideshowButton key={listKey} source={source} />
 				<PageActions
 					menu={[
 						{ label: t.albums.renameAlbum, icon: <IconEdit size={18} />, onSelect: () => void rename() },
@@ -709,19 +717,41 @@ export function AlbumPage() {
 					]}
 				/>
 			</div>
-			<TypeFilter value={type} onChange={setType} />
+			<ListFilters type={type} setType={setType} showArchived={showArchived} setShowArchived={setShowArchived} />
 			<LibraryList
-				key={`${albumId}:${type}`}
+				key={listKey}
 				source={source}
 				datedScrubber
-				context={{ kind: "album", albumId }}
+				context={{ kind: "album", albumId, withArchived: showArchived }}
 				empty={type ? t.albums.emptyType : t.albums.empty}
 			/>
 		</div>
 	);
 }
 
-// ------------------------------------------------------------------ 收藏 / 回收站
+/** 文件夹 / 相册页头下的筛选：类型筛选条（窄屏可以横向滑动）+ 右边的“显示归档照片” */
+function ListFilters({
+	type,
+	setType,
+	showArchived,
+	setShowArchived,
+}: {
+	type: ReturnType<typeof useTypeFilter>[0];
+	setType: ReturnType<typeof useTypeFilter>[1];
+	showArchived: boolean;
+	setShowArchived: (show: boolean) => void;
+}) {
+	return (
+		<div className="flex items-center gap-3">
+			<div className="min-w-0 flex-1">
+				<TypeFilter value={type} onChange={setType} />
+			</div>
+			<ShowArchivedToggle value={showArchived} onChange={setShowArchived} />
+		</div>
+	);
+}
+
+// ------------------------------------------------------------------ 收藏 / 归档 / 回收站
 
 export function FavoritesPage() {
 	useDocumentTitle(t.favorites.title);
@@ -729,6 +759,32 @@ export function FavoritesPage() {
 		<div className="space-y-6">
 			<h1 className="page-title pt-1">{t.favorites.title}</h1>
 			<LibraryList source={{ key: ["favorites"], path: "/favorites/assets" }} context={{ kind: "library" }} empty={t.favorites.empty} />
+		</div>
+	);
+}
+
+export function ArchivePage() {
+	useDocumentTitle(t.archive.title);
+	const [type, setType] = useTypeFilter();
+	const source: ListSource = { key: ["archive", type], path: withType("/archive/assets", type) };
+	return (
+		<div className="space-y-5">
+			<div className="flex items-center gap-2 pt-1">
+				<h1 className="page-title flex-1">{t.archive.title}</h1>
+				<SlideshowButton key={type} source={source} />
+			</div>
+			<p className="flex items-start gap-2.5 rounded-2xl bg-notice px-4 py-3 text-sm">
+				<IconArchive size={18} className="mt-0.5 shrink-0 text-muted" />
+				{t.archive.notice}
+			</p>
+			<TypeFilter value={type} onChange={setType} />
+			<LibraryList
+				key={type}
+				source={source}
+				datedScrubber
+				context={{ kind: "archive" }}
+				empty={type ? t.archive.emptyType : t.archive.empty}
+			/>
 		</div>
 	);
 }

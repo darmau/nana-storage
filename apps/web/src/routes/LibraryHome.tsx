@@ -1,12 +1,12 @@
 import { Link } from "@tanstack/react-router";
 import { t } from "../i18n";
 import { StorageMeter } from "../library/StorageMeter";
-import { IconHeart, IconTrash } from "../ui/icons";
+import { IconArchive, IconHeart, IconTrash } from "../ui/icons";
 import { useDocumentTitle } from "../ui/title";
 
 /**
  * 资料库首页（移动端底部“资料库”标签的落点；桌面端这些入口在侧边栏里）。
- * 只放别处没有的入口：相册、文件夹有自己的标签，人物、重复照片在探索页里，不在这里重复。
+ * 只放别处没有的入口（收藏、归档、回收站）：相册、文件夹有自己的标签，人物、重复照片在探索页里，不在这里重复。
  */
 export function LibraryHome() {
 	useDocumentTitle(t.nav.library);
@@ -15,10 +15,14 @@ export function LibraryHome() {
 	return (
 		<div className="space-y-7">
 			<h1 className="page-title pt-1">{t.nav.library}</h1>
-			<div className="grid grid-cols-2 gap-2">
+			<div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
 				<Link to="/favorites" className={quick}>
 					<IconHeart className="text-[#c0392b] dark:text-[#f28b82]" />
 					{t.favorites.title}
+				</Link>
+				<Link to="/archive" className={quick}>
+					<IconArchive className="text-muted" />
+					{t.archive.title}
 				</Link>
 				<Link to="/trash" className={quick}>
 					<IconTrash className="text-danger" />

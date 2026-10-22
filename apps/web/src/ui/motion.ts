@@ -15,7 +15,7 @@ type ViewTransitionOptions = Exclude<NonNullable<RouterOptions<any, any>["defaul
  */
 
 /** 顶层页面：从这里进出都只淡入淡出（侧边栏里的每一项） */
-const TOP = new Set(["/", "/albums", "/search", "/people", "/smart-sets", "/map", "/stats", "/library", "/favorites", "/trash", "/duplicates", "/folders/root", "/settings"]);
+const TOP = new Set(["/", "/albums", "/search", "/people", "/smart-sets", "/map", "/stats", "/library", "/favorites", "/archive", "/trash", "/duplicates", "/folders/root", "/settings"]);
 
 const under = (path: string, p: string) => path === p || path.startsWith(`${p}/`);
 

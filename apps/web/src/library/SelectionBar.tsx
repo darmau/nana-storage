@@ -6,6 +6,7 @@ import { confirmDialog } from "../ui/confirm";
 import { type MenuItem, openMenuAt } from "../ui/ContextMenu";
 import {
 	IconAlbum,
+	IconArchive,
 	IconCheck,
 	IconClose,
 	IconDownload,
@@ -28,8 +29,11 @@ import { reassignPerson, removeFromPerson } from "../people/model";
 import { PersonPicker } from "../people/PersonPicker";
 
 export type BarContext =
-	| { kind: "library" }
-	| { kind: "album"; albumId: string }
+	/** withArchived：列表里可能有归档的照片（文件夹页勾选了“显示归档照片”），归档和取消归档都提供 */
+	| { kind: "library"; withArchived?: boolean }
+	| { kind: "album"; albumId: string; withArchived?: boolean }
+	/** 归档页：只提供“取消归档” */
+	| { kind: "archive" }
 	/** 人物页面：可以“从此人物中移除” */
 	| { kind: "person"; personId: string; name: string | null }
 	| { kind: "trash" }
@@ -41,6 +45,10 @@ export type BarContext =
 /** 加入主题样本后的提示：其中和分类器矛盾的张数。 */
 const samplesText = (label: 1 | -1) => (r: { conflicts: number }) => t.actions.addedSamples(label, r.conflicts);
 const createdText = (r: { suggestions: number }) => t.actions.createdTopic(r.suggestions);
+
+/** 这个列表里提供哪些归档操作：归档页只能取消归档，显示了归档照片的列表两种都有，其余只能归档。 */
+const archiveModes = (context: BarContext): boolean[] =>
+	context.kind === "archive" ? [false] : "withArchived" in context && context.withArchived ? [true, false] : [true];
 
 /** 先确认再执行 */
 const confirmTrash = (n: number, fn: () => unknown) =>
@@ -124,7 +132,9 @@ export function AssetActionsProvider({ context, children }: { context: BarContex
 		[run],
 	);
 	// 页面每次渲染都会传一个新的 context 对象，按内容固定下来，免得所有格子跟着重渲染
-	const scopeId = context.kind === "album" ? context.albumId : context.kind === "person" ? `${context.personId}:${context.name ?? ""}` : "";
+	const scopeId =
+		(context.kind === "album" ? context.albumId : context.kind === "person" ? `${context.personId}:${context.name ?? ""}` : "") +
+		("withArchived" in context && context.withArchived ? ":archived" : "");
 	const setKey = context.kind === "smartSet" ? `${context.setId}:${context.view}` : context.kind === "topicResults" ? context.setId : "";
 	const ctx = useMemo(() => context, [context.kind, scopeId, setKey]);
 	const value = useMemo(() => ({ context: ctx, busy, run, pick, download }), [ctx, busy, run, pick, download]);
@@ -265,6 +275,13 @@ export function useAssetMenu() {
 				icon: <IconHeart size={18} filled={unfavorite} />,
 				onSelect: () => void run(() => batch(qc, ids, { action: "favorite", value: !unfavorite }), undefined, !multi),
 			},
+			...archiveModes(context).map(
+				(value): MenuItem => ({
+					label: value ? t.actions.archive : t.actions.unarchive,
+					icon: <IconArchive size={18} />,
+					onSelect: () => void run(() => batch(qc, ids, { action: "archive", value }), value ? t.actions.archived : t.actions.unarchived),
+				}),
+			),
 			{ label: t.actions.addToAlbumMenu, icon: <IconAlbum size={18} />, onSelect: () => pick("album", ids) },
 			{ label: t.actions.moveToFolderMenu, icon: <IconFolderMove size={18} />, onSelect: () => pick("folder", ids) },
 			{ label: t.actions.addToTopicMenu, icon: <IconSimilar size={18} />, onSelect: () => pick("smartSet", ids) },
@@ -317,7 +334,15 @@ export function SelectionBar() {
 	const label = "sr-only sm:not-sr-only";
 	// 手机上一行放不下全部按钮：只留收藏、加入相册、下载、删除，其余收进“更多”
 	const desktopOnly = "max-sm:hidden";
+	const archive = archiveModes(context).map((value) => ({
+		value,
+		label: value ? t.actions.archive : t.actions.unarchive,
+		onSelect: () => void run(() => batch(qc, ids, { action: "archive", value }), value ? t.actions.archived : t.actions.unarchived),
+	}));
+	// 归档页里“取消归档”是主要操作，手机上也直接显示
+	const archiveInBar = context.kind === "archive";
 	const more: MenuItem[] = [
+		...(archiveInBar ? [] : archive.map((a) => ({ label: a.label, icon: <IconArchive size={18} />, onSelect: a.onSelect }))),
 		{ label: t.actions.moveToFolder, icon: <IconFolderMove size={18} />, onSelect: () => pick("folder", ids) },
 		{ label: t.actions.addToTopic, icon: <IconSimilar size={18} />, onSelect: () => pick("smartSet", ids) },
 		{ label: t.actions.editMeta, icon: <IconEdit size={18} />, onSelect: () => pick("meta", ids) },
@@ -382,6 +407,12 @@ export function SelectionBar() {
 							<IconAlbum />
 							<span className={label}>{t.actions.addToAlbum}</span>
 						</button>
+						{archive.map((a) => (
+							<button key={a.label} className={`${btn} ${archiveInBar ? "" : desktopOnly}`} disabled={busy} onClick={a.onSelect}>
+								<IconArchive />
+								<span className={label}>{a.label}</span>
+							</button>
+						))}
 						<button className={`${btn} ${desktopOnly}`} disabled={busy} onClick={() => pick("folder", ids)}>
 							<IconFolderMove />
 							<span className={label}>{t.actions.move}</span>

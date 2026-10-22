@@ -6,6 +6,7 @@ import { Hono } from "hono";
  *   GET /api/timeline/month/:ym  某个月的全部条目（紧凑数组，按拍摄时间倒序）
  * 拍摄时间未知的条目放在 "unknown" 这个桶里，排在最后。
  * 连拍只显示一张封面（收藏的优先，否则最早的一张），封面带上整组的 id，张数也按组计算。
+ * 归档的照片（assets.archived）不在时间线里，只在归档页显示。
  */
 
 type Bindings = { Bindings: Env };
@@ -17,7 +18,7 @@ const MONTH_RE = /^\d{4}-\d{2}$/;
 timeline.get("/buckets", async (c) => {
 	const { results } = await c.env.DB.prepare(
 		`SELECT COALESCE(local_month, '${UNKNOWN_MONTH}') AS month, COUNT(DISTINCT COALESCE(burst_id, id)) AS count
-		 FROM assets WHERE deleted_at IS NULL AND status = 'ready'
+		 FROM assets WHERE deleted_at IS NULL AND status = 'ready' AND archived = 0
 		 GROUP BY local_month ORDER BY local_month IS NULL, local_month DESC`,
 	).all<{ month: string; count: number }>();
 	return c.json(results);
@@ -73,7 +74,7 @@ timeline.get("/month/:ym", async (c) => {
 					PARTITION BY COALESCE(burst_id, id) ORDER BY taken_at, id
 					ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) END AS burst
 			-- 写明索引：“未知日期”（local_month IS NULL）时规划器会顺着 assets_timeline 扫完整个资料库
-			FROM assets INDEXED BY assets_month WHERE ${where} AND deleted_at IS NULL AND status = 'ready'
+			FROM assets INDEXED BY assets_month WHERE ${where} AND deleted_at IS NULL AND status = 'ready' AND archived = 0
 		 ) WHERE rk = 1
 		 ORDER BY taken_at DESC, id DESC`,
 	);

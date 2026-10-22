@@ -3,6 +3,7 @@ import { api } from "../api";
 
 export type BatchAction =
 	| { action: "favorite"; value: boolean }
+	| { action: "archive"; value: boolean }
 	| { action: "trash" }
 	| { action: "restore" }
 	| { action: "delete-forever" }

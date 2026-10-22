@@ -10,7 +10,7 @@ import { GuardBanner } from "./routes/GuardBanner";
 import { BurstPage } from "./routes/BurstPage";
 import { LibraryHome } from "./routes/LibraryHome";
 import { exploreSearch, SearchBox, SearchPage } from "./routes/SearchPage";
-import { AlbumPage, AlbumsPage, FavoritesPage, FoldersPage, TrashPage } from "./routes/LibraryPages";
+import { AlbumPage, AlbumsPage, ArchivePage, FavoritesPage, FoldersPage, TrashPage } from "./routes/LibraryPages";
 import { PeoplePage, PersonPage } from "./routes/PeoplePages";
 import { DuplicatesPage, SimilarPage } from "./routes/SimilarPages";
 import { SmartSetPage, SmartSetsPage, validateSmartSetSearch } from "./routes/SmartSetPages";
@@ -28,6 +28,7 @@ import { UploadPicker, uploadMenuItems } from "./upload/picker";
 import { ProgressRing, UploadWatcher, useUploadProgress } from "./upload/UploadStatus";
 import {
 	IconAlbum,
+	IconArchive,
 	IconChart,
 	IconChevronRight,
 	IconCompass,
@@ -45,7 +46,7 @@ import {
 } from "./ui/icons";
 
 /** 资料库下的页面：移动端底部的“资料库”标签在这些页面上都算选中（相册、文件夹有自己的标签）。 */
-const LIBRARY_PATHS = ["/library", "/favorites", "/trash"];
+const LIBRARY_PATHS = ["/library", "/favorites", "/archive", "/trash"];
 /** 探索下的页面：移动端底部的“探索”标签在这些页面上也算选中（地图、重复照片、统计数据在移动端从探索页进入） */
 const EXPLORE_PATHS = ["/search", "/people", "/smart-sets", "/map", "/duplicates", "/stats"];
 const under = (pathname: string, p: string) => pathname === p || pathname.startsWith(`${p}/`);
@@ -130,6 +131,9 @@ function Layout() {
 				<SideLink to="/favorites" icon={<IconHeart />}>
 					{t.favorites.title}
 				</SideLink>
+				<SideLink to="/archive" icon={<IconArchive />}>
+					{t.archive.title}
+				</SideLink>
 				{/* 小标题本身就是探索页的入口（搜索结果也在那里） */}
 				<Link
 					to="/search"
@@ -198,7 +202,7 @@ function SideLink({
 	forceActive,
 	children,
 }: {
-	to: "/" | "/map" | "/people" | "/smart-sets" | "/stats" | "/albums" | "/favorites" | "/trash";
+	to: "/" | "/map" | "/people" | "/smart-sets" | "/stats" | "/albums" | "/favorites" | "/archive" | "/trash";
 	icon: React.ReactNode;
 	exact?: boolean;
 	forceActive?: boolean;
@@ -289,6 +293,7 @@ const routeTree = rootRoute.addChildren([
 	createRoute({ getParentRoute: () => rootRoute, path: "/smart-sets/$setId", component: SmartSetPage, validateSearch: validateSmartSetSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/similar/$assetId", component: SimilarPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/duplicates", component: DuplicatesPage, validateSearch: viewerSearch }),
+	createRoute({ getParentRoute: () => rootRoute, path: "/archive", component: ArchivePage, validateSearch: listSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/trash", component: TrashPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/search", component: SearchPage, validateSearch: exploreSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/stats", component: StatsPage, validateSearch: viewerSearch }),

@@ -212,6 +212,10 @@ export const zhCN = {
 		deleteForever: "永久删除",
 		favorite: "收藏",
 		unfavorite: "取消收藏",
+		archive: "归档",
+		unarchive: "取消归档",
+		archived: "已归档，可以在“归档”里找到",
+		unarchived: "已取消归档",
 		addToAlbum: "加入相册",
 		addToAlbumMenu: "加入相册…",
 		move: "移动",
@@ -504,6 +508,13 @@ export const zhCN = {
 	favorites: {
 		title: "收藏",
 		empty: "还没有收藏的照片。",
+	},
+	archive: {
+		title: "归档",
+		notice: "归档的照片不会出现在“照片”、相册和文件夹里（在相册或文件夹页勾选“显示归档照片”可以看到），搜索、地图和人物里照常显示。",
+		empty: "还没有归档的照片。",
+		emptyType: "归档里没有这一类的照片。",
+		showArchived: "显示归档照片",
 	},
 	trash: {
 		title: "回收站",
