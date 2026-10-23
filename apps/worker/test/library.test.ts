@@ -76,6 +76,32 @@ describe("folders", () => {
 		expect(list.json.details[0][1]).toBe(3);
 	});
 
+	it("sorts folder assets by name, taken, upload time, size and format", async () => {
+		const f = await call("POST", "/folders", { name: "S" });
+		for (const n of [1, 2, 3, 4]) await seed(n, { folder: f.json.id });
+		// [文件名, 大小, 上传时间]；拍摄时间按编号递增
+		const rows: [number, string | null, number, number][] = [
+			[1, "b.JPG", 30, 400],
+			[2, "a.heic", 10, 100],
+			[3, "C.mov", 20, 300],
+			[4, null, 40, 200],
+		];
+		for (const [n, name, size, created] of rows)
+			await env.DB.prepare("UPDATE assets SET file_name = ?, file_size = ?, created_at = ? WHERE id = ?").bind(name, size, created, id(n)).run();
+		await env.DB.prepare("UPDATE assets SET taken_at = NULL WHERE id = ?").bind(id(3)).run();
+		const order = async (q: string) =>
+			(await call("GET", `/folders/${f.json.id}/assets?${q}`)).json.items.map((i: unknown[]) => Number(String(i[0]).slice(3)));
+
+		expect(await order("")).toEqual([4, 2, 1, 3]);
+		expect(await order("sort=taken&order=asc")).toEqual([1, 2, 4, 3]); // 没有拍摄时间的都在最后
+		expect(await order("sort=name&order=asc")).toEqual([2, 1, 3, 4]); // 不分大小写，没有文件名的在最后
+		expect(await order("sort=name")).toEqual([3, 1, 2, 4]);
+		expect(await order("sort=uploaded")).toEqual([1, 3, 4, 2]);
+		expect(await order("sort=size&order=asc")).toEqual([2, 3, 1, 4]);
+		expect(await order("sort=format&order=asc")).toEqual([4, 2, 1, 3]); // "" < heic < JPG < mov
+		expect(await order("sort=bogus")).toEqual(await order(""));
+	});
+
 	it("counts assets in all nested subfolders without mixing up siblings", async () => {
 		const a = await call("POST", "/folders", { name: "A" });
 		const b = await call("POST", "/folders", { name: "B" });

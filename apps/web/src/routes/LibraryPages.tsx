@@ -24,6 +24,7 @@ import { type MenuItem, openContextMenu, openMenuAt } from "../ui/ContextMenu";
 import {
 	IconAlbum,
 	IconArchive,
+	IconCheck,
 	IconChevronRight,
 	IconEdit,
 	IconFolder,
@@ -34,13 +35,23 @@ import {
 	IconMore,
 	IconPlus,
 	IconSlideshow,
+	IconSort,
 	IconTrash,
 } from "../ui/icons";
 import { FolderPeople } from "../people/FolderPeople";
 import { personQuery } from "../people/model";
 import { uploadMenuItems } from "../upload/picker";
 import { Slideshow } from "../viewer/Slideshow";
-import { type FolderView, setFolderView, useFolderView } from "../ui/folderView";
+import {
+	FOLDER_SORTS,
+	type FolderSort,
+	type FolderView,
+	defaultAsc,
+	setFolderSort,
+	setFolderView,
+	useFolderSort,
+	useFolderView,
+} from "../ui/folderView";
 import { useDocumentTitle } from "../ui/title";
 import { AlbumCardsSkeleton, FolderCardsSkeleton, FolderRowsSkeleton } from "../ui/Skeleton";
 import { fmtNumber } from "../i18n/format";
@@ -191,6 +202,40 @@ function ViewToggle({ view }: { view: FolderView }) {
 	);
 }
 
+/**
+ * 文件夹里照片的排序：上面选排序方式（拍摄时间 / 文件名 / 上传时间 / 尺寸 / 格式），下面选方向。
+ * 换排序方式时方向回到它的默认值（名称、格式从 A 到 Z，其余从新到旧 / 从大到小）。
+ */
+function SortMenuButton({ sort }: { sort: FolderSort }) {
+	const label = t.folders.sortTitle(t.folders.sortKeys[sort.key]);
+	const [desc, asc] =
+		sort.key === "name" || sort.key === "format"
+			? [t.folders.sortZA, t.folders.sortAZ]
+			: sort.key === "size"
+				? [t.folders.sortLargest, t.folders.sortSmallest]
+				: [t.folders.sortNewest, t.folders.sortOldest];
+	const check = (on: boolean) => (on ? <IconCheck /> : undefined);
+	const open = (anchor: HTMLElement) =>
+		openMenuAt(anchor, [
+			{ heading: t.folders.sort },
+			...FOLDER_SORTS.map(
+				(key): MenuItem => ({
+					label: t.folders.sortKeys[key],
+					icon: check(sort.key === key),
+					onSelect: () => sort.key !== key && setFolderSort({ key, asc: defaultAsc(key) }),
+				}),
+			),
+			"sep",
+			{ label: desc, icon: check(!sort.asc), onSelect: () => setFolderSort({ ...sort, asc: false }) },
+			{ label: asc, icon: check(sort.asc), onSelect: () => setFolderSort({ ...sort, asc: true }) },
+		]);
+	return (
+		<button className="icon-btn" aria-label={label} title={label} aria-haspopup="menu" onClick={(e) => open(e.currentTarget)}>
+			<IconSort />
+		</button>
+	);
+}
+
 /** 列表里有照片时才显示；和下面的网格共用同一个分页查询，不会多请求。 */
 export function SlideshowButton({ source }: { source: ListSource }) {
 	const query = useInfiniteQuery(listQuery(source));
@@ -263,14 +308,20 @@ export function FoldersPage() {
 	const [showArchived, setShowArchived] = useShowArchived();
 	const { data: personData } = useQuery({ ...personQuery(person ?? ""), enabled: !!person });
 	const view = useFolderView();
+	const sort = useFolderSort();
+	// 只有按拍摄时间排序时才按天分组、拖动条才带年份和月份
+	const byTaken = sort.key === "taken";
 	// 列表视图的接口多带文件名、大小和时间（都是 assets 自己的列），单独缓存；幻灯片和列表共用同一个 source，不会多请求。
 	// 按人物筛选走单独的路径（ETag 同时带上人物的版本）
 	const assetsPath = person ? `/folders/${folderId}/people/${person}/assets` : `/folders/${folderId}/assets`;
 	const source: ListSource =
 		view === "list"
-			? { key: ["folder", folderId, type, person, showArchived, "list"], path: listPath(assetsPath, { type, archived: showArchived, view: "list" }) }
-			: { key: ["folder", folderId, type, person, showArchived], path: listPath(assetsPath, { type, archived: showArchived }) };
-	const listKey = `${folderId}:${type}:${person}:${showArchived}:${view}`;
+			? {
+					key: ["folder", folderId, type, person, showArchived, sort.key, sort.asc, "list"],
+					path: listPath(assetsPath, { type, archived: showArchived, view: "list", sort }),
+				}
+			: { key: ["folder", folderId, type, person, showArchived, sort.key, sort.asc], path: listPath(assetsPath, { type, archived: showArchived, sort }) };
+	const listKey = `${folderId}:${type}:${person}:${showArchived}:${view}:${sort.key}:${sort.asc}`;
 
 	const mutate = async (fn: () => Promise<unknown>) => {
 		setErr(null);
@@ -346,6 +397,7 @@ export function FoldersPage() {
 						);
 					})}
 				</nav>
+				<SortMenuButton sort={sort} />
 				<ViewToggle view={view} />
 				<SlideshowButton key={listKey} source={source} />
 				{/* 上传在顶栏的“上传”里（在文件夹页面会传到这个文件夹），这里不重复 */}
@@ -401,7 +453,8 @@ export function FoldersPage() {
 				key={listKey}
 				source={source}
 				view={view}
-				datedScrubber
+				groupByDay={byTaken}
+				datedScrubber={byTaken}
 				// 按人物筛选时，选中照片的操作和人物页一样（“这不是 X”“这是其他人物”），直接改认错的脸
 				context={person ? { kind: "person", personId: person, name: personData?.name ?? null } : { kind: "library", withArchived: showArchived }}
 				// 有子文件夹时不提示，只有整个目录都是空的才说“空目录”

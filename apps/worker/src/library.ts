@@ -53,7 +53,13 @@ export const offsetOf = (v: string | undefined) => {
  * 分页读取列表。withMonths：列表按拍摄时间倒序时，第一页（而且不止一页）顺带返回整个列表的每月张数，
  * 前端的拖动条据此知道总长度和月份位置。只有一页时前端从条目里自己算，不多查。
  */
-export async function page(env: Env, sql: string, binds: unknown[], offset: number, { withMonths = false, details = false } = {}) {
+export async function page(
+	env: Env,
+	sql: string,
+	binds: unknown[],
+	offset: number,
+	{ withMonths = false, details = false, monthsAsc = false } = {},
+) {
 	type Row = Parameters<typeof toItem>[0] & Partial<DetailRow>;
 	const list = env.DB.prepare(`${sql} LIMIT ? OFFSET ?`).bind(...binds, PAGE + 1, offset);
 	// 第一页的每月张数和这一页放在同一个 batch 里（少一次往返）；只有一页时用不上，丢掉（最多多读 500 行）。
@@ -63,7 +69,7 @@ export async function page(env: Env, sql: string, binds: unknown[], offset: numb
 					list,
 					env.DB.prepare(
 						`SELECT COALESCE(substr(local_day, 1, 7), 'unknown') AS month, COUNT(*) AS count FROM (${sql})
-						 GROUP BY 1 ORDER BY month = 'unknown', month DESC`,
+						 GROUP BY 1 ORDER BY month = 'unknown', month ${monthsAsc ? "ASC" : "DESC"}`,
 					).bind(...binds),
 				])
 			: [await list.all<Row>(), null];
@@ -245,6 +251,34 @@ library.get("/folders/:id/unfinished", async (c) => {
 });
 
 /**
+ * 文件夹的排序（?sort=&order=）：拍摄时间（默认，倒序）、文件名、上传时间、尺寸（原件大小）、格式（扩展名）。
+ * 只有默认的“拍摄时间倒序”和 assets_folder_visible 的顺序一致；其余都按这个索引读出整个文件夹再临时排序
+ * （每页读一遍本文件夹的行，量和文件夹大小相同，不加索引：每多一个索引每次写 assets 都要多维护一份）。
+ * 最后都按 id 排，偏移量分页的顺序是确定的。
+ */
+const FolderSort = z.enum(["taken", "name", "uploaded", "size", "format"]).catch("taken");
+type FolderSort = z.infer<typeof FolderSort>;
+/** 扩展名：去掉最后一个点之前的部分（rtrim 去掉末尾所有不是点的字符，得到“到最后一个点为止”的前缀）；没有点时为空 */
+const EXT = "CASE WHEN instr(a.file_name, '.') THEN substr(a.file_name, length(rtrim(a.file_name, replace(a.file_name, '.', ''))) + 1) ELSE '' END";
+function folderOrder(sort: FolderSort, asc: boolean) {
+	const d = asc ? "ASC" : "DESC";
+	switch (sort) {
+		case "taken":
+			// 没有拍摄时间的始终在最后（倒序时本来就在最后，和索引的顺序一致）
+			return asc ? "a.taken_at ASC NULLS LAST, a.id ASC" : "a.taken_at DESC, a.id DESC";
+		case "name":
+			return `a.file_name IS NULL, a.file_name COLLATE NOCASE ${d}, a.id ${d}`;
+		case "uploaded":
+			return `a.created_at ${d}, a.id ${d}`;
+		case "size":
+			return `a.file_size ${d}, a.id ${d}`;
+		case "format":
+			// 同一格式里按拍摄时间倒序
+			return `${EXT} COLLATE NOCASE ${d}, a.taken_at DESC, a.id DESC`;
+	}
+}
+
+/**
  * 文件夹里的照片（只看本文件夹）。personId：只要有这个人物的脸的（文件夹页的人物筛选，
  * GET /folders/:id/people/:personId/assets；路径单独一条，ETag 同时带上 people 版本，见 src/dbcache.ts）。
  */
@@ -252,6 +286,8 @@ async function folderAssets(c: Context<Bindings>, personId: string | null) {
 	const id = c.req.param("id") === "root" ? null : c.req.param("id");
 	const type = typeCondition(TypeParam.parse(c.req.query("type")));
 	const details = c.req.query("view") === "list";
+	const sort = FolderSort.parse(c.req.query("sort") ?? "taken");
+	const asc = c.req.query("order") === "asc";
 	return c.json(
 		await page(
 			c.env,
@@ -260,10 +296,11 @@ async function folderAssets(c: Context<Bindings>, personId: string | null) {
 			`SELECT ${ITEM_COLUMNS}${details ? `, ${DETAIL_COLUMNS}` : ""}
 			 FROM ${personId ? "(SELECT DISTINCT asset_id FROM faces WHERE person_id = ?) p CROSS JOIN assets a ON a.id = p.asset_id" : "assets a INDEXED BY assets_folder_visible"}
 			 WHERE ${id ? "a.folder_id = ?" : "a.folder_id IS NULL"} AND ${VISIBLE}${andArchived(c)}${andType(type)}
-			 ORDER BY a.taken_at DESC, a.id DESC`,
+			 ORDER BY ${folderOrder(sort, asc)}`,
 			[...(personId ? [personId] : []), ...(id ? [id] : []), ...(type?.binds ?? [])],
 			offsetOf(c.req.query("offset")),
-			{ withMonths: true, details },
+			// 每月张数（拖动条的年份 / 月份）只在按拍摄时间排序时有意义
+			{ withMonths: sort === "taken", details, monthsAsc: asc },
 		),
 	);
 }

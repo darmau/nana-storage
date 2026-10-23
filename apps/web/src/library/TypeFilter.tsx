@@ -58,12 +58,20 @@ export function useShowArchived(): [boolean, (show: boolean) => void] {
 /** 列表接口的地址加上类型筛选 */
 export const withType = (path: string, type: AssetType | undefined) => (type ? `${path}?type=${type}` : path);
 
-/** 列表接口的地址加上查询参数（类型筛选、显示归档、列表视图），值为空的不加 */
-export function listPath(path: string, params: { type?: AssetType; archived?: boolean; view?: "list" }) {
+/** 列表接口的地址加上查询参数（类型筛选、显示归档、列表视图、文件夹的排序），值为空的不加 */
+export function listPath(
+	path: string,
+	params: { type?: AssetType; archived?: boolean; view?: "list"; sort?: { key: string; asc: boolean } },
+) {
 	const q = new URLSearchParams();
 	if (params.type) q.set("type", params.type);
 	if (params.archived) q.set("archived", "1");
 	if (params.view) q.set("view", params.view);
+	// 默认的“拍摄时间从新到旧”不带参数，地址（和缓存）和以前一样
+	if (params.sort && (params.sort.key !== "taken" || params.sort.asc)) {
+		q.set("sort", params.sort.key);
+		if (params.sort.asc) q.set("order", "asc");
+	}
 	const s = q.toString();
 	return s ? `${path}?${s}` : path;
 }
