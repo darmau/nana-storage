@@ -4,6 +4,9 @@
 
 ## 未发布
 
+- 设备端去掉“本机原件”（`compose.override.yaml` 把原图目录挂到 `/local`）：挂载的目录（比如 NAS）没连上时 Docker 启动不了。在设备界面（localhost:7878）上传的照片照旧直接用本机的那份、不下载原图；网页上传的照片由设备处理时从服务器下载。
+  **需要操作**（用设备端处理、配过 `compose.override.yaml` 的）：删掉 `apps/device/compose.override.yaml`，再在 `apps/device` 下重新构建：`docker compose up -d --build`。
+
 - 设备端处理更快：模型推理移到 worker 线程池（原来全部在主线程上排队，多核用不上），exiftool 改成常驻进程。
   12 核电脑上并发处理的吞吐约提高到原来的 2.4 倍，处理期间设备界面和上传也不再卡顿；处理结果和以前逐字节相同。
   云端容器同样改用常驻 exiftool（每个任务省约 50 毫秒容器时间），推理不变。

@@ -1,15 +1,15 @@
+import { createReadStream } from "node:fs";
 import { mkdir, mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { deriveTask, metaTask, saveInput, transcodeTask } from "../processor/lib.mjs";
 import { ApiError } from "./client.mjs";
-import { openLocal } from "./local.mjs";
 
 /**
  * progress：界面用的进度（main.mjs 的任务条目），这里只往上写字段：
  *   stage   local / download / derive / meta / transcode / upload / complete
- *   source  输入从哪里来：local 本机找到的原件 / download 从服务器下载（有一个是下载的就算 download）
+ *   source  输入从哪里来：local 本机暂存的上传文件 / download 从服务器下载（有一个是下载的就算 download）
  *   step    derive 里的细分步骤（decode / images / thumb / fingerprint / faces，见 lib.mjs）
  *   bytes / total  下载进度
  *   thumb   缩略图生成好之后的字节（只在内存里，界面显示用）
@@ -122,7 +122,7 @@ export async function runJob(api, plan, progress = {}, local = null) {
 }
 
 /**
- * 在本机找输入文件（local 有 candidates(name, size)，可选 used(path)：设备上传的暂存文件和本机挂载的原件，见 main.mjs）：
+ * 在本机找输入文件（local 有 candidates(name, size) 和 used(path)：设备上传的暂存文件，见 upload.mjs）：
  * 大小一样的候选复制到临时目录（顺便算 sha256，复制出来的就是处理用的那一份，期间原文件变了也不影响），
  * 和上传时的 sha256 一致后，再让服务器对 R2 上的对象算一次 sha256（代替下载后的完整性校验），也一致才用。
  * 任何一步对不上或出错都返回 null，照旧下载。认领失效（ClaimLost）照常抛出。
@@ -131,7 +131,7 @@ async function fromLocal(call, base, q, f, path, local, counted) {
 	for (const candidate of local.candidates(f.name, f.size)) {
 		let saved;
 		try {
-			saved = await saveInput(counted(openLocal(candidate)), path);
+			saved = await saveInput(counted(createReadStream(candidate, { highWaterMark: 1024 * 1024 })), path);
 		} catch {
 			continue;
 		}
@@ -144,7 +144,7 @@ async function fromLocal(call, base, q, f, path, local, counted) {
 			return null;
 		}
 		if (remote.sha256 === f.sha256 && remote.size === f.size) {
-			// 已经复制到任务的临时目录：设备上传暂存的那份可以删了（本机挂载的原件没有 used，不动）
+			// 已经复制到任务的临时目录：暂存的那份可以删了
 			local.used?.(candidate);
 			return saved;
 		}

@@ -179,15 +179,7 @@ function renderStats(s) {
 	$("s-rate").textContent = s.perMinute ? (s.perMinute < 10 ? s.perMinute.toFixed(1) : String(Math.round(s.perMinute))) : "–";
 	$("s-done").textContent = fmtNum(s.done);
 	const l = s.local;
-	const localText = !l
-		? null
-		: l.jobs
-			? T.stats.localJobs(fmtNum(l.jobs), fmtBytes(l.bytes))
-			: l.scanning
-				? T.stats.localScanning
-				: l.available
-					? T.stats.localIndexed(fmtNum(l.files))
-					: null;
+	const localText = l?.jobs ? T.stats.localJobs(fmtNum(l.jobs), fmtBytes(l.bytes)) : null;
 	$("s-done-sub").textContent = [T.stats.failed(fmtNum(s.failed)), T.stats.uptime(fmtMs(s.now - s.since)), localText].filter(Boolean).join(" · ");
 	if (server?.counts) {
 		const c = server.counts;

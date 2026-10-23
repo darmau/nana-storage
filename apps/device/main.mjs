@@ -7,7 +7,6 @@ import { pipeline } from "node:stream/promises";
 import { setExiftoolProcs, setSessionFactory } from "../processor/lib.mjs";
 import { Api, ApiError, Auth, AuthError, normalizeSite, sleep } from "./client.mjs";
 import { InferencePool, poolSize } from "./inference.mjs";
-import { LocalFiles } from "./local.mjs";
 import { runJob } from "./runner.mjs";
 import { Uploads } from "./upload.mjs";
 
@@ -74,10 +73,7 @@ const state = {
 	since: Date.now(),
 };
 
-/** 本机的原件（compose.override.yaml 挂到 /local，没挂就是空的）：找得到就不下载 */
-const local = new LocalFiles(process.env.NANA_LOCAL_DIR ?? "/local");
-void local.refresh({ force: true });
-/** 输入全部来自本机的任务数、省下的下载量 */
+/** 输入全部来自本机暂存文件的任务数、省下的下载量 */
 const localStats = { jobs: 0, bytes: 0 };
 
 /** 在本地界面里上传（upload.mjs）：上传用的那份留在暂存目录，本机处理时直接用，不下载 */
@@ -88,9 +84,9 @@ const uploads = new Uploads({
 	onUploaded: () => wake(),
 });
 await uploads.init();
-/** runner 找输入文件的地方：先找刚上传的暂存文件，再找挂载的原件目录 */
+/** runner 找输入文件的地方：刚上传的暂存文件 */
 const sources = {
-	candidates: (name, size) => [...uploads.candidates(name, size), ...local.candidates(name, size)],
+	candidates: (name, size) => uploads.candidates(name, size),
 	used: (path) => uploads.used(path),
 };
 
@@ -355,7 +351,7 @@ function publicState() {
 		failed: state.failed,
 		since: state.since,
 		cpus,
-		local: { available: local.available, scanning: Boolean(local.scanning), files: local.files, ...localStats },
+		local: localStats,
 		uploads: uploads.summary(),
 		now: Date.now(),
 	};

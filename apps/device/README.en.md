@@ -31,25 +31,10 @@ To stop: `docker compose stop` (or click "hand back to the cloud", 交还云端)
 
 The UI shows the library on the left and ongoing tasks (upload progress, processing, recently finished) on the right. The library works like the web app: open folders and subfolders and see photo thumbnails. **Uploads go into the folder you're in**: click "Upload files" or "Upload a folder", or drag files and folders onto the page (a folder keeps its directory structure as subfolders). HEIC + MOV pairs become Live Photos, RAW + JPEG pairs become one item, and duplicates are skipped, just like uploading in the web app.
 
-- While this device is processing, uploaded photos are processed right here, **without downloading the originals from the server again**, and no folder needs to be mounted. When it isn't, cloud containers process them (which costs container time); the UI tells you which.
+- While this device is processing, uploaded photos are processed right here, **without downloading the originals from the server again**. When it isn't, cloud containers process them (which costs container time); the UI tells you which.
 - This page reads the files and hands them to the local program, so **keep the page open while sending**. If you close it, choose the remaining files again (ones already uploaded are skipped as duplicates) or click "Cancel the rest".
 - This UI has no login of its own: once the device is signed in to your library, anyone who can open `localhost:7878` on this computer can browse your photos (the port is bound to this machine only; other devices on your network can't reach it).
 - Staged files take at most 4 GB of disk; when that's full, sending waits until this computer has processed some. They're deleted once processed, cancelled, or handed back to the cloud.
-
-## Local originals (optional, skips downloads)
-
-For photos uploaded through the web app, if the originals are still on this computer (or a NAS it can reach), you can mount those folders read-only into the container. Processing then reads the local files instead of downloading them from the server again:
-
-```bash
-cp compose.override.example.yaml compose.override.yaml   # set your own folders; you can mount several
-docker compose up -d --build
-```
-
-- An index is built in the background at startup (file sizes and names only, contents are not read). The UI shows how many files were indexed. Missing files trigger a rescan at most every 5 minutes, so newly copied files are picked up.
-- Candidates are matched by size, with same-name files first; renamed files work too, e.g. after a photo library export. Each candidate is hashed (sha256) while being copied to a temporary folder and is used only if the hash matches the one recorded at upload.
-- Before using it, the server also hashes the copy stored in R2. That happens inside Cloudflare, not over your network. This replaces the integrity check after download: if a disk read went wrong during upload, the local file is fine but the copy in R2 is corrupt, and that must be caught. On a mismatch the file is downloaded as usual and the task fails under the normal rules.
-- The server doesn't hash files larger than 2 GB (Worker CPU time is limited), so those are always downloaded.
-- Any error at any step falls back to downloading; a local file never makes a task fail.
 
 ## How it works
 

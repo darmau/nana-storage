@@ -380,7 +380,7 @@ export class Uploads {
 		await rm(r.path, { force: true });
 	}
 
-	// ---- 给 runner.mjs 的 fromLocal 用（和 local.mjs 的 LocalFiles 同样的接口）
+	// ---- 给 runner.mjs 的 fromLocal 用
 
 	/** 大小一样的暂存文件，同名的在前。 */
 	candidates(name, size) {
