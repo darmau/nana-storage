@@ -198,7 +198,7 @@ function ExploreHome({ onType }: { onType: (type: AssetType) => void }) {
 			<SmartSetStrip />
 			<section className="space-y-3">
 				<h2 className="text-lg font-bold">{t.explore.more}</h2>
-				<div className="grid gap-2 sm:grid-cols-2">
+				<div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
 					<Shortcut to="/map" icon={<IconMap />} title={t.nav.map} sub={t.explore.mapSub} />
 					<Shortcut to="/duplicates" icon={<IconDuplicate />} title={t.duplicates.title} sub={t.explore.duplicatesSub} />
 					<Shortcut to="/stats" icon={<IconChart />} title={t.stats.title} sub={t.explore.statsSub} />
