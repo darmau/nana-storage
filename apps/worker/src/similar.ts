@@ -175,12 +175,14 @@ export async function saveFingerprint(env: Env, assetId: string, fp: Fingerprint
 	// 先写 Vectorize，成功了就直接插入 indexed = 1，省掉事后再改一遍这一行（和 asset_fp_unindexed 索引）。
 	// D1 写入失败时 Vectorize 里会多出一个没有对应行的向量，查询结果一律用 D1 过滤，不影响。
 	const vectorized = (await upsertVectors(env, [{ id: assetId, embedding: parsed.embedding }])) > 0;
-	await env.DB.prepare(
-		`INSERT OR REPLACE INTO asset_fp (asset_id, model, phash, b0, b1, b2, b3, b4, embedding, indexed, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-	)
-		.bind(assetId, FP_MODEL_VER, parsed.phash, ...bands, blobOf(parsed.embedding), vectorized ? 1 : 0, now)
-		.run();
+	// 重写整行（similar_at 回到 NULL，之后重新查近邻），旧向量查出来的相似照片对一起删掉
+	await env.DB.batch([
+		env.DB.prepare(
+			`INSERT OR REPLACE INTO asset_fp (asset_id, model, phash, b0, b1, b2, b3, b4, embedding, indexed, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		).bind(assetId, FP_MODEL_VER, parsed.phash, ...bands, blobOf(parsed.embedding), vectorized ? 1 : 0, now),
+		env.DB.prepare("DELETE FROM similar_pairs WHERE a = ?1 OR b = ?1").bind(assetId),
+	]);
 	await savePairs(env, assetId, parsed.phash, bands, parsed.embedding);
 	await scoreForSmartSets(env, assetId, parsed.embedding);
 	return true;
@@ -244,13 +246,17 @@ async function upsertVectors(env: Env, rows: { id: string; embedding: Int8Array 
 	return rows.length;
 }
 
-/** 补写已经在 D1 里的向量：写入 Vectorize，成功后标记 indexed（updated_at 不变才标记，期间被重写过的留给下一次）。 */
+/**
+ * 补写已经在 D1 里的向量：写入 Vectorize，成功后标记 indexed（updated_at 不变才标记，期间被重写过的留给下一次）。
+ * updated_at 同时改成现在：它也是“进索引的时间”，相似照片要等进索引 SIMILAR_SCAN_SETTLE_MS 之后才查（similar-groups.ts）。
+ */
 async function indexVectors(env: Env, rows: { id: string; embedding: Int8Array; updatedAt: number }[]) {
 	if (!(await upsertVectors(env, rows))) return 0;
+	const now = Date.now();
 	for (let i = 0; i < rows.length; i += 50) {
 		await env.DB.batch(
 			rows.slice(i, i + 50).map((r) =>
-				env.DB.prepare("UPDATE asset_fp SET indexed = 1 WHERE asset_id = ? AND updated_at = ?").bind(r.id, r.updatedAt),
+				env.DB.prepare("UPDATE asset_fp SET indexed = 1, updated_at = ? WHERE asset_id = ? AND updated_at = ?").bind(now, r.id, r.updatedAt),
 			),
 		);
 	}
@@ -356,7 +362,7 @@ async function visibleItems(env: Env, ids: string[]): Promise<Map<string, ItemRo
 }
 
 /** 按 id 分块查可见条目，所有分块一起发（每次 batch 最多 50 条语句），不一条等一条。 */
-async function selectByIds<T extends { id: string }>(env: Env, columns: string, ids: string[]): Promise<Map<string, T>> {
+export async function selectByIds<T extends { id: string }>(env: Env, columns: string, ids: string[]): Promise<Map<string, T>> {
 	const rows = new Map<string, T>();
 	const stmts: D1PreparedStatement[] = [];
 	for (let i = 0; i < ids.length; i += CHUNK) {
@@ -424,8 +430,8 @@ type PairRow = Pick<DupRow, "id" | "phash" | "kind" | "burst_id"> & Partial<Pick
 /** 分组要用的列（从候选对里读出来）。 */
 type ScanRow = Pick<DupRow, "id" | "phash" | "kind" | "burst_id" | "taken_at" | "camera" | "meta_locked">;
 /** 推荐保留哪一张要用的列：只给当前页里的照片查，不在全库扫描里读。 */
-type KeeperRow = ItemRow & Pick<DupRow, "traits" | "created_at" | "size">;
-const KEEPER_COLUMNS = `${ITEM_COLUMNS}, a.traits, a.created_at,
+export type KeeperRow = ItemRow & Pick<DupRow, "traits" | "created_at" | "size">;
+export const KEEPER_COLUMNS = `${ITEM_COLUMNS}, a.traits, a.created_at,
 	(SELECT size FROM asset_files WHERE asset_id = a.id AND role IN ('original', 'raw') ORDER BY role = 'original' DESC LIMIT 1) AS size`;
 
 /** 候选对的上限：全黑、全白这类哈希相同的照片很多时，避免两两组合撑爆内存。 */

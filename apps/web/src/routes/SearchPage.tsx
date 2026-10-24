@@ -8,7 +8,7 @@ import { LibraryList } from "../library/LibraryList";
 import { smartSetsQuery } from "../library/queries";
 import { ASSET_TYPE_LABELS } from "../library/TypeFilter";
 import { FaceAvatar, peopleQuery, personName } from "../people/model";
-import { IconChart, IconChevronRight, IconClose, IconDuplicate, IconHeart, IconMap, IconSearch, IconSimilar } from "../ui/icons";
+import { IconChart, IconChevronRight, IconClose, IconDuplicate, IconHeart, IconLookalike, IconMap, IconSearch, IconSimilar } from "../ui/icons";
 import { useDocumentTitle } from "../ui/title";
 import { Cover } from "./LibraryPages";
 import { smartSetLine } from "./SmartSetPages";
@@ -201,6 +201,7 @@ function ExploreHome({ onType }: { onType: (type: AssetType) => void }) {
 				<div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
 					<Shortcut to="/map" icon={<IconMap />} title={t.nav.map} sub={t.explore.mapSub} />
 					<Shortcut to="/duplicates" icon={<IconDuplicate />} title={t.duplicates.title} sub={t.explore.duplicatesSub} />
+					<Shortcut to="/similar-groups" icon={<IconLookalike />} title={t.lookalike.title} sub={t.explore.lookalikeSub} />
 					<Shortcut to="/stats" icon={<IconChart />} title={t.stats.title} sub={t.explore.statsSub} />
 				</div>
 			</section>
@@ -300,7 +301,7 @@ function SmartSetStrip() {
 	);
 }
 
-function Shortcut({ to, icon, title, sub }: { to: "/map" | "/duplicates" | "/stats"; icon: React.ReactNode; title: string; sub: string }) {
+function Shortcut({ to, icon, title, sub }: { to: "/map" | "/duplicates" | "/similar-groups" | "/stats"; icon: React.ReactNode; title: string; sub: string }) {
 	return (
 		<Link to={to} className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 transition hover:bg-surface">
 			<span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent-ink">{icon}</span>

@@ -173,6 +173,34 @@ export const SIMILAR_TOP_K = 30;
 export const SIMILAR_MIN_SCORE = 0.85;
 
 /**
+ * “相似照片”整理（apps/worker/src/similar-groups.ts）：看起来差不多的照片，只按 CLIP 向量判断，不看拍摄时间。
+ * 每张照片查一次 Vectorize（前 SIMILAR_GROUP_TOP_K 个），余弦达到 SIMILAR_GROUP_MIN_COSINE 的照片对存进 D1 的 similar_pairs。
+ * 阈值是固定的（没有灵敏度可选）；改了它之后已经存下的照片对不会重算，要清空 similar_pairs 和 asset_fp.similar_at。
+ */
+export const SIMILAR_GROUP_MIN_COSINE = 0.9;
+export const SIMILAR_GROUP_TOP_K = 20;
+/** 一组最多这么多张：以一张为中心，组里每一张都和它足够像，剩下的留给别的组。 */
+export const SIMILAR_GROUP_MAX = 50;
+/**
+ * 向量进 Vectorize 之后要过一会儿才能被查到。只查进索引超过这么久的照片，这样两张差不多同时处理的照片里，
+ * 后查的那张一定能查到先进索引的那张（否则两边都可能错过对方）。
+ */
+export const SIMILAR_SCAN_SETTLE_MS = 10 * 60_000;
+/**
+ * 查近邻（每张 1 次 Vectorize 查询 + 约 25 行 D1 写入），每张照片只查一次（指纹重写后再查一次）：
+ *  - 每小时 Cron 最多 SIMILAR_SCAN_CRON_BATCH 张，熔断时跳过，不会自我触发。最坏每天 24 × 300 = 7200 次查询（约 370 万查询维度）。
+ *  - 打开“相似照片”页面时，还有没查过的就由页面分批请求，每次 SIMILAR_SCAN_BATCH 张，每次打开最多 SIMILAR_SCAN_CALLS 次
+ *    （5 万张），页面关掉或切到后台就停，出错即停。5 万张的库补完一次约 2560 万查询维度、125 万行 D1 写入，都在每月的免费额度内。
+ */
+export const SIMILAR_SCAN_CRON_BATCH = 300;
+export const SIMILAR_SCAN_BATCH = 100;
+export const SIMILAR_SCAN_CALLS = 500;
+/** 打开页面时最多读这么多照片对（每对 2 行 assets），超出的部分不分组。 */
+export const SIMILAR_PAIR_MAX = 200_000;
+/** 一次“暂不处理”最多涉及的照片数。 */
+export const SIMILAR_SNOOZE_MAX = 200;
+
+/**
  * 自定义主题：最多 SMART_SET_MAX 个，每个最多 SMART_SET_MAX_EXAMPLES 个样本（正 + 负）。
  * 每个主题是一个逻辑回归分类器（apps/worker/src/smartset-model.ts），分数 p 在 0–1 之间。它只负责建议，
  * 照片放进哪个相册由用户在“结果”里手动挑，所以样本保持小规模。

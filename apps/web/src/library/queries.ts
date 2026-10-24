@@ -139,6 +139,19 @@ export interface DuplicateGroups {
 	scanned: number;
 	truncated: boolean;
 }
+export interface SimilarGroups {
+	/** 推荐保留的在每组最前面；snoozed：点过“暂不处理”（排在队列末尾） */
+	groups: { keep: string; items: TimelineItem[]; snoozed: boolean }[];
+	total: number;
+	next: number | null;
+	/** 有指纹的照片数 */
+	fingerprints: number;
+	/** 还没比较过的张数 */
+	pending: number;
+	truncated: boolean;
+	/** 本地开发没有 Vectorize：不比较新照片 */
+	unavailable?: boolean;
+}
 export const smartSetsQuery = {
 	queryKey: ["smart-sets"],
 	queryFn: async () => (await api<{ items: SmartSetSummary[] }>("/smart-sets")).items,

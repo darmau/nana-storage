@@ -339,6 +339,16 @@ export const IconDuplicate = icon(
 	</>,
 );
 
+/** 相似照片：一叠照片 */
+export const IconLookalike = icon(
+	<>
+		<rect x="3" y="9" width="12" height="12" rx="2" />
+		<path d="m3 18 3.5-3.5 3 3 1.5-1.5 4 4" />
+		<path d="M7 6h9a2 2 0 0 1 2 2v9" />
+		<path d="M11 3h8a2 2 0 0 1 2 2v8" />
+	</>,
+);
+
 export const IconLogo = ({ size = 28 }: { size?: number }) => (
 	<svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="shrink-0">
 		<rect width="32" height="32" rx="8" className="fill-fg" />

@@ -12,7 +12,7 @@ import { confirmDialog } from "../ui/confirm";
 import { DuplicateGroupsSkeleton } from "../ui/Skeleton";
 import { IconDuplicate, IconInfo, IconTrash } from "../ui/icons";
 import type { AssetDetail } from "../viewer/types";
-import { DuplicateCompare } from "./DuplicateCompare";
+import { DuplicateCompare, comparePill } from "./DuplicateCompare";
 import { useDocumentTitle } from "../ui/title";
 
 
@@ -240,21 +240,43 @@ export function DuplicatesPage() {
 					current={search.a}
 					groupIndex={gi}
 					groupCount={groups.length}
-					busy={busy}
+					label={t.compare.dialog}
 					onSelect={(id) => setA(id, true)}
 					onGroup={(d) => {
 						const g = groups[gi + d];
 						if (g) setA(g.items[0]![0], true);
 					}}
 					onClose={close}
-					onTrash={(id) => trash.mutate([id], { onSuccess: () => afterPhoto(gi, id) })}
-					onKeepOnly={(id) => {
-						const ids = groups[gi]!.items.map((i) => i[0]).filter((x) => x !== id);
-						trash.mutate(ids, { onSuccess: () => afterGroup(gi) });
+					actions={(id) => {
+						const g = groups[gi]!;
+						const n = g.items.length;
+						const onIgnore = (pivot?: string) =>
+							ignore.mutate({ ids: ignoreIds(g, pivot), pivot }, { onSuccess: () => (pivot ? afterPhoto(gi, pivot) : afterGroup(gi)) });
+						return (
+							<>
+								<button
+									type="button"
+									className={comparePill}
+									disabled={busy}
+									onClick={() => trash.mutate(g.items.map((i) => i[0]).filter((x) => x !== id), { onSuccess: () => afterGroup(gi) })}
+								>
+									{t.compare.keepThis}
+								</button>
+								<button type="button" className={comparePill} disabled={busy} onClick={() => trash.mutate([id], { onSuccess: () => afterPhoto(gi, id) })}>
+									<IconTrash size={16} />
+									{t.compare.deleteThis}
+								</button>
+								{n > 2 && (
+									<button type="button" className={comparePill} disabled={busy} onClick={() => onIgnore(id)} title={t.compare.notThisTitle}>
+										{t.compare.notThis}
+									</button>
+								)}
+								<button type="button" className={comparePill} disabled={busy} onClick={() => onIgnore()} title={t.compare.ignoreTitle}>
+									{n > 2 ? t.compare.noneDuplicate : t.duplicates.notDuplicate}
+								</button>
+							</>
+						);
 					}}
-					onIgnore={(pivot) =>
-						ignore.mutate({ ids: ignoreIds(groups[gi]!, pivot), pivot }, { onSuccess: () => (pivot ? afterPhoto(gi, pivot) : afterGroup(gi)) })
-					}
 				/>
 			)}
 			{undo && (

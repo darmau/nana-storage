@@ -4,14 +4,18 @@ import { locale, t } from "../i18n";
 import { api } from "../api";
 import { formatBytes } from "../timeline/format";
 import { previewUrl, thumbUrl, type TimelineItem } from "../timeline/types";
-import { IconChevronLeft, IconChevronRight, IconClose, IconTrash } from "../ui/icons";
+import { IconChevronLeft, IconChevronRight, IconClose } from "../ui/icons";
 import { useThemeColor } from "../ui/themeColor";
 import type { AssetDetail } from "../viewer/types";
 
+/** 对比界面底部的操作按钮 */
+export const comparePill =
+	"inline-flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-sm font-medium text-white hover:bg-white/20 disabled:opacity-40";
+
 /**
- * 重复照片对比：一组里的几张叠在同一个位置，←/→（或数字键、左右滑动）瞬间切换，差别一眼就能看出来。
+ * 重复 / 相似照片对比：一组里的几张叠在同一个位置，←/→（或数字键、左右滑动）瞬间切换，差别一眼就能看出来。
  * 点一下放大到点击的位置（鼠标移动时跟着平移），切换照片时保持放大位置，方便比较细节。
- * 当前照片前后各 PRELOAD 张的预览一直挂着，切换时不用重新加载。
+ * 当前照片前后各 PRELOAD 张的预览一直挂着，切换时不用重新加载。底部的操作按钮由页面传进来（actions）。
  */
 const PRELOAD = 2;
 /** 信息最多取这么多张（每张一次 /api/assets/:id，和查看器共用缓存） */
@@ -43,26 +47,22 @@ export function DuplicateCompare({
 	current,
 	groupIndex,
 	groupCount,
-	busy,
+	label,
 	onSelect,
 	onGroup,
 	onClose,
-	onTrash,
-	onKeepOnly,
-	onIgnore,
+	actions,
 }: {
 	group: DuplicateGroup;
 	current: string;
 	groupIndex: number;
 	groupCount: number;
-	busy: boolean;
+	label: string;
 	onSelect: (id: string) => void;
 	onGroup: (delta: 1 | -1) => void;
 	onClose: () => void;
-	onTrash: (id: string) => void;
-	onKeepOnly: (id: string) => void;
-	/** pivot 为空：整组都不是重复 */
-	onIgnore: (pivot?: string) => void;
+	/** 当前这张照片的操作按钮（用 comparePill） */
+	actions: (id: string) => React.ReactNode;
 }) {
 	useThemeColor("#000000");
 	const items = group.items;
@@ -165,8 +165,6 @@ export function DuplicateCompare({
 		const d = Math.abs(i - index);
 		return Math.min(d, n - d) <= PRELOAD;
 	};
-	const pill =
-		"inline-flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-sm font-medium text-white hover:bg-white/20 disabled:opacity-40";
 
 	return (
 		<div
@@ -174,7 +172,7 @@ export function DuplicateCompare({
 			className="theme-dark fixed inset-0 z-50 flex select-none flex-col bg-black text-fg"
 			role="dialog"
 			aria-modal="true"
-			aria-label={t.compare.dialog}
+			aria-label={label}
 		>
 			<div className="flex items-center gap-1 pl-[max(0.5rem,var(--safe-left))] pr-[max(0.5rem,var(--safe-right))] pt-[max(0.5rem,var(--safe-top))]">
 				<button type="button" className="icon-btn hover:!bg-white/15" aria-label={t.common.close} title={t.compare.closeTitle} onClick={onClose}>
@@ -322,23 +320,7 @@ export function DuplicateCompare({
 					</div>
 				</div>
 
-				<div className="flex flex-wrap justify-center gap-2">
-					<button type="button" className={pill} disabled={busy} onClick={() => onKeepOnly(it[0])}>
-						{t.compare.keepThis}
-					</button>
-					<button type="button" className={pill} disabled={busy} onClick={() => onTrash(it[0])}>
-						<IconTrash size={16} />
-						{t.compare.deleteThis}
-					</button>
-					{n > 2 && (
-						<button type="button" className={pill} disabled={busy} onClick={() => onIgnore(it[0])} title={t.compare.notThisTitle}>
-							{t.compare.notThis}
-						</button>
-					)}
-					<button type="button" className={pill} disabled={busy} onClick={() => onIgnore()} title={t.compare.ignoreTitle}>
-						{n > 2 ? t.compare.noneDuplicate : t.duplicates.notDuplicate}
-					</button>
-				</div>
+				<div className="flex flex-wrap justify-center gap-2">{actions(it[0])}</div>
 				<p className="hidden text-center text-xs text-muted sm:block">{t.compare.shortcuts}</p>
 			</div>
 		</div>

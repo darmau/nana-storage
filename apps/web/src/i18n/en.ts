@@ -636,6 +636,26 @@ export const en: Messages = {
 		keepRecommended: "Keep only recommended",
 		ignored: "Marked as not duplicates",
 	},
+	lookalike: {
+		title: "Similar photos",
+		dialog: "Compare similar photos",
+		intro:
+			"Photos that look alike: different versions of the same picture (resized, cropped, watermarked, screenshots) or shots from the same moment with a slightly different pose or expression. Only the picture itself counts, not when it was taken; when people are recognized in both, they must share at least one person. The one to keep is picked by favorite, RAW, resolution, then file size. Not sure? Choose “Later” and the group moves to the end of the queue to come back around.",
+		summary: (groups: number, photos: number, truncated: boolean) =>
+			`${count(groups, "group", "groups")}, compared ${count(photos, "fingerprinted photo", "fingerprinted photos")}${truncated ? " (too many look-alikes, only some were grouped)" : ""}.`,
+		scanning: (n: number) => `Comparing, ${fmtNumber(n)} left…`,
+		waiting: (n: number) => `${count(n, "newly processed photo hasn't", "newly processed photos haven't")} been compared yet; this happens automatically soon.`,
+		unavailable: "The similarity index is unavailable, so new photos won't be compared.",
+		none: "No similar photos found.",
+		snooze: "Later",
+		snoozedBefore: "Put off before",
+		archiveOthers: "Archive the rest",
+		trashOthers: "Move the rest to Trash",
+		keepThisTrash: "Keep this, trash the rest",
+		keepThisArchive: "Keep this, archive the rest",
+		trashed: (n: number) => `Moved ${count(n, "photo", "photos")} to Trash`,
+		archived: (n: number) => `Archived ${count(n, "photo", "photos")}`,
+	},
 	nav: {
 		home: (app: string) => `${app} timeline`,
 		searchHint: "Search file names and descriptions, or filter by date, type and camera",
@@ -691,6 +711,7 @@ export const en: Messages = {
 		more: "More",
 		mapSub: "Browse by where photos were taken",
 		duplicatesSub: "Find near-identical photos and keep one",
+		lookalikeSub: "Find photos that look alike and keep the best one",
 		statsSub: "Capture dates, cameras, largest files, storage and cost",
 	},
 	compare: {

@@ -168,6 +168,7 @@ for (const stats of [false, true]) describe(`list query plans ${stats ? "with sk
 		["/search?q=abc&favorite=1", /LIMIT \? OFFSET \?$/],
 		["/people", /COUNT\(DISTINCT f.asset_id\)/],
 		["/duplicates", /FROM duplicate_pairs p/],
+		["/similar-groups", /FROM similar_pairs p/],
 	];
 	for (const [path, match] of others) {
 		it(`${path} does not scan the whole library`, async () => {

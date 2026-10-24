@@ -4,6 +4,8 @@
 
 ## 未发布
 
+- 新增“相似照片”（探索页）：找出看起来差不多的照片（同一张图的各种版本、同一次拍摄里略有不同的几张），只看画面内容、不看拍摄时间，每组挑一张保留，其余移到回收站或归档，也可以“暂不处理”排到最后。用已有的 CLIP 向量和 Vectorize 索引，不增加容器时间；已有照片在打开页面时分批比较（或由每小时的 Cron 慢慢补上）。D1 迁移 `0025_similar_groups.sql` 只加表、列和索引，部署时自动执行，不需要操作。
+
 - 设备端去掉“本机原件”（`compose.override.yaml` 把原图目录挂到 `/local`）：挂载的目录（比如 NAS）没连上时 Docker 启动不了。在设备界面（localhost:7878）上传的照片照旧直接用本机的那份、不下载原图；网页上传的照片由设备处理时从服务器下载。
   **需要操作**（用设备端处理、配过 `compose.override.yaml` 的）：删掉 `apps/device/compose.override.yaml`，再在 `apps/device` 下重新构建：`docker compose up -d --build`。
 

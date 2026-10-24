@@ -14,7 +14,7 @@ export type BatchAction =
 
 /** 资料库里任何数据变了以后，刷新所有相关列表。 */
 export function invalidateLibrary(qc: QueryClient) {
-	for (const key of ["timeline", "list", "asset", "folders", "albums", "smart-sets", "similar", "duplicates", "people", "storage-summary"])
+	for (const key of ["timeline", "list", "asset", "folders", "albums", "smart-sets", "similar", "duplicates", "similar-groups", "people", "storage-summary"])
 		void qc.invalidateQueries({ queryKey: [key] });
 }
 
@@ -85,6 +85,13 @@ export async function setSmartSetFolders(qc: QueryClient, setId: string, folders
 		json: { folders: folders.length ? folders : null },
 	});
 	invalidateLibrary(qc);
+	return res;
+}
+
+/** 相似照片“暂不处理”：这些照片所在的组排到队列末尾。 */
+export async function snoozeSimilar(qc: QueryClient, ids: string[]) {
+	const res = await api<{ snoozed: number }>("/similar-groups/snooze", { method: "POST", json: { ids } });
+	void qc.invalidateQueries({ queryKey: ["similar-groups"] });
 	return res;
 }
 

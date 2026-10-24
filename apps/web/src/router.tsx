@@ -13,6 +13,7 @@ import { exploreSearch, SearchBox, SearchPage } from "./routes/SearchPage";
 import { AlbumPage, AlbumsPage, ArchivePage, FavoritesPage, FoldersPage, TrashPage } from "./routes/LibraryPages";
 import { PeoplePage, PersonPage } from "./routes/PeoplePages";
 import { DuplicatesPage, SimilarPage } from "./routes/SimilarPages";
+import { SimilarGroupsPage } from "./routes/SimilarGroupsPage";
 import { SmartSetPage, SmartSetsPage, validateSmartSetSearch } from "./routes/SmartSetPages";
 import { TimelinePage, validateTimelineSearch } from "./routes/TimelinePage";
 import { StatsPage } from "./routes/StatsPage";
@@ -48,7 +49,7 @@ import {
 /** 资料库下的页面：移动端底部的“资料库”标签在这些页面上都算选中（相册、文件夹有自己的标签）。 */
 const LIBRARY_PATHS = ["/library", "/favorites", "/archive", "/trash"];
 /** 探索下的页面：移动端底部的“探索”标签在这些页面上也算选中（地图、重复照片、统计数据在移动端从探索页进入） */
-const EXPLORE_PATHS = ["/search", "/people", "/smart-sets", "/map", "/duplicates", "/stats"];
+const EXPLORE_PATHS = ["/search", "/people", "/smart-sets", "/map", "/duplicates", "/similar-groups", "/stats"];
 const under = (pathname: string, p: string) => pathname === p || pathname.startsWith(`${p}/`);
 
 /**
@@ -293,6 +294,7 @@ const routeTree = rootRoute.addChildren([
 	createRoute({ getParentRoute: () => rootRoute, path: "/smart-sets/$setId", component: SmartSetPage, validateSearch: validateSmartSetSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/similar/$assetId", component: SimilarPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/duplicates", component: DuplicatesPage, validateSearch: viewerSearch }),
+	createRoute({ getParentRoute: () => rootRoute, path: "/similar-groups", component: SimilarGroupsPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/archive", component: ArchivePage, validateSearch: listSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/trash", component: TrashPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/search", component: SearchPage, validateSearch: exploreSearch }),
