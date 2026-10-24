@@ -43,8 +43,8 @@ export type BarContext =
 	| { kind: "smartSet"; setId: string; view: "samples" | "review" }
 	/** 主题的“结果”：和资料库一样的操作（主要是加入相册），另外可以标成“不属于这个主题” */
 	| { kind: "topicResults"; setId: string }
-	/** 整理 › 原图压缩的候选：主要操作是“压缩原图”，另外可以下载、删除 */
-	| { kind: "compress" };
+	/** 整理 › 原图压缩的列表：主要操作是“压缩原图”（maxPixels 是页面上选的分辨率上限，0 不缩小），另外可以下载、删除 */
+	| { kind: "compress"; maxPixels: number };
 
 /** 加入主题样本后的提示：其中和分类器矛盾的张数。 */
 const samplesText = (label: 1 | -1) => (r: { conflicts: number }) => t.actions.addedSamples(label, r.conflicts);
@@ -76,7 +76,7 @@ const COMPRESS_ESTIMATE_SECONDS = 15;
  * 原图压缩会替换原图，先确认。顺带提醒云端处理的时间和费用（和上传面板的估算同一个算法，扣掉本月剩下的免费额度）；
  * 设备端接管时由设备处理，不产生容器费用。成本防护只读一次（打开确认框时）。
  */
-async function confirmCompress(qc: QueryClient, n: number, fn: () => unknown) {
+async function confirmCompress(qc: QueryClient, n: number, maxPixels: number, fn: () => unknown) {
 	const guard = await qc.fetchQuery({ queryKey: ["guard"], queryFn: () => api<GuardStatus>("/guard"), staleTime: 30_000 }).catch(() => null);
 	const seconds = n * COMPRESS_ESTIMATE_SECONDS;
 	let cost = "";
@@ -87,7 +87,7 @@ async function confirmCompress(qc: QueryClient, n: number, fn: () => unknown) {
 	}
 	const ok = await confirmDialog({
 		title: t.compress.confirmTitle(n),
-		message: `${t.compress.confirmMessage}${cost ? ` ${cost}` : ""}`,
+		message: [t.compress.confirmMessage, maxPixels ? t.compress.confirmResize(maxPixels / 10_000) : "", cost].filter(Boolean).join(" "),
 		confirmLabel: t.compress.action,
 		danger: true,
 	});
@@ -286,7 +286,7 @@ export function useAssetMenu() {
 			return [
 				...head,
 				"sep",
-				{ label: t.compress.action, icon: <IconCompress size={18} />, onSelect: () => void confirmCompress(qc, ids.length, () => run(() => compressOriginals(qc, ids), compressDone)) },
+				{ label: t.compress.action, icon: <IconCompress size={18} />, onSelect: () => void confirmCompress(qc, ids.length, context.maxPixels, () => run(() => compressOriginals(qc, ids, context.maxPixels), compressDone)) },
 				{ label: multi ? t.actions.download : t.actions.downloadOriginal, icon: <IconDownload size={18} />, onSelect: () => download(ids) },
 				"sep",
 				{
@@ -430,7 +430,7 @@ export function SelectionBar() {
 					))
 				) : context.kind === "compress" ? (
 					<>
-						<button className={btn} disabled={busy} onClick={() => void confirmCompress(qc, ids.length, () => run(() => compressOriginals(qc, ids), compressDone))}>
+						<button className={btn} disabled={busy} onClick={() => void confirmCompress(qc, ids.length, context.maxPixels, () => run(() => compressOriginals(qc, ids, context.maxPixels), compressDone))}>
 							<IconCompress />
 							<span>{t.compress.action}</span>
 						</button>

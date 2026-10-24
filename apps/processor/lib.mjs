@@ -711,6 +711,52 @@ function spliceMeta(original, encoded, meta) {
 /** 只是描述编码方式的段不搬：APP14（Adobe 的颜色变换标志，新编码由 libjpeg 决定）、MPF（指向附图，带附图的不压缩） */
 const keepSegment = (seg) => seg[1] !== 0xee && !(seg[1] === 0xe2 && seg.subarray(4, 8).toString("latin1") === "MPF\0");
 
+/**
+ * 缩小分辨率之后，把 EXIF 子 IFD 里的像素尺寸（PixelXDimension / PixelYDimension）改成新的。
+ * 只原地改这两个值（SHORT / LONG，各 1 个），不改结构；不是标准的 EXIF 或解析不了的原样返回。
+ */
+export function patchExifSize(seg, width, height) {
+	if (seg[1] !== 0xe1 || seg.subarray(4, 10).toString("latin1") !== "Exif\0\0") return seg;
+	try {
+		const t = Buffer.from(seg);
+		const base = 10;
+		const le = t.toString("latin1", base, base + 2) === "II";
+		const u16 = (o) => (le ? t.readUInt16LE(o) : t.readUInt16BE(o));
+		const u32 = (o) => (le ? t.readUInt32LE(o) : t.readUInt32BE(o));
+		const entries = (offset, fn) => {
+			const p = base + offset;
+			if (!offset || p + 2 > t.length) return;
+			const n = u16(p);
+			for (let i = 0; i < n; i++) {
+				const e = p + 2 + i * 12;
+				if (e + 12 > t.length) return;
+				fn(e, u16(e), u16(e + 2), u32(e + 4));
+			}
+		};
+		let sub = 0;
+		entries(u32(base + 4), (e, tag, _type, count) => {
+			if (tag === 0x8769 && count === 1) sub = u32(e + 8);
+		});
+		entries(sub, (e, tag, type, count) => {
+			const v = tag === 0xa002 ? width : tag === 0xa003 ? height : null;
+			if (v === null || count !== 1) return;
+			// 值放在条目的最后 4 个字节里，SHORT 靠左
+			if (type === 3 && v <= 0xffff) le ? t.writeUInt16LE(v, e + 8) : t.writeUInt16BE(v, e + 8);
+			else if (type === 4) le ? t.writeUInt32LE(v, e + 8) : t.writeUInt32BE(v, e + 8);
+		});
+		return t;
+	} catch {
+		return seg;
+	}
+}
+
+/** 缩小到不超过 maxPixels 的尺寸（按比例，向下取整）；不用缩小时返回 null。 */
+export function downscaleSize(width, height, maxPixels) {
+	if (!(maxPixels > 0) || width * height <= maxPixels) return null;
+	const s = Math.sqrt(maxPixels / (width * height));
+	return { width: Math.max(1, Math.floor(width * s)), height: Math.max(1, Math.floor(height * s)) };
+}
+
 /** 压缩前后必须一样的元数据（exiftool -n 的字段名）。段是原样搬过去的，这里只是确认一遍 */
 const COMPRESS_SAME_TAGS = ["DateTimeOriginal", "SubSecTimeOriginal", "OffsetTimeOriginal", "GPSLatitude", "GPSLongitude", "Orientation", "Make", "Model", "ContentIdentifier"];
 
@@ -719,8 +765,11 @@ async function vipsNumber(args) {
 }
 
 /**
- * 原图压缩：JPEG 原件按 quality 重新编码，像素尺寸不变，元数据段原样保留（见 shared 的 COMPRESS_JPEG_QUALITY）。
- * 返回 { body, outPath }。body：{ sha256, size, crc32（输入的）, skipped, out: { sha256, size, crc32 } | null }。
+ * 原图压缩：JPEG 原件按 quality 重新编码，元数据段原样保留（见 shared 的 COMPRESS_JPEG_QUALITY）。
+ * maxPixels > 0 且原图超过它时顺便按比例缩小到不超过它（shared 的 COMPRESS_TARGET_PIXELS），EXIF 里的像素尺寸改成新的；
+ * 否则像素尺寸不变。尺寸都是文件里存的方向（没按 Orientation 转）。
+ * 返回 { body, outPath }。body：{ sha256, size, crc32（输入的）, width, height（原图的）, skipped,
+ *   out: { sha256, size, crc32, width, height } | null }。
  * 不压缩时 outPath 为 null，skipped 是原因（Worker 记成“不值得压缩”，以后不再列出）：
  *   not-jpeg      不是 8 位 Huffman 编码的 JPEG（无损 / 算术编码 / 12 位）
  *   colourspace   不是 1 或 3 个通道（CMYK 之类）
@@ -730,9 +779,10 @@ async function vipsNumber(args) {
  * 压缩后校验：能完整解码、尺寸和通道一样、关键元数据一样、缩小后和原图逐像素的平均差值不超过 maxDiff。
  * 任何一项不对就抛错（任务失败，原图不动）。
  */
-export async function compressTask(input, dir, { quality, minSaving, maxBytes, maxDiff, onStep = () => {} }) {
+export async function compressTask(input, dir, { quality, minSaving, maxBytes, maxDiff, maxPixels = 0, onStep = () => {} }) {
 	if (!Number.isInteger(quality) || quality < 50 || quality > 100) throw new Error("bad quality");
-	const base = { sha256: input.sha256, size: input.size, crc32: input.crc32 };
+	if (!Number.isFinite(maxPixels) || maxPixels < 0) throw new Error("bad max pixels");
+	let base = { sha256: input.sha256, size: input.size, crc32: input.crc32, width: null, height: null };
 	const skip = (skipped) => ({ body: { ...base, skipped, out: null }, outPath: null });
 	if (input.size > maxBytes) return skip("too-large");
 	onStep("decode");
@@ -745,6 +795,7 @@ export async function compressTask(input, dir, { quality, minSaving, maxBytes, m
 	}
 	const { sof } = parsed;
 	if (!sof || !PLAIN_SOF.has(sof.marker) || sof.precision !== 8) return skip("not-jpeg");
+	base = { ...base, width: sof.width, height: sof.height };
 	if (sof.components.length !== 1 && sof.components.length !== 3) return skip("colourspace");
 	if (src.subarray(parsed.end).some((b) => b !== 0 && b !== 0xff)) return skip("extra-data");
 
@@ -754,8 +805,20 @@ export async function compressTask(input, dir, { quality, minSaving, maxBytes, m
 	const subsample = sof.components.length === 3 && y.h === 2 && y.v === 2 ? "on" : "off";
 	const encoded = join(dir, "encoded.jpg");
 	const opts = [`Q=${quality}`, "optimize_coding", "keep=none", `subsample_mode=${subsample}`, ...(sof.marker === 0xc2 ? ["interlace"] : [])];
-	await run("vips", ["copy", input.path, `${encoded}[${opts.join(",")}]`], { timeoutMs: 150_000 });
-	const out = spliceMeta(src, await readFile(encoded), parsed.meta.filter(keepSegment));
+	const size = downscaleSize(sof.width, sof.height, maxPixels);
+	const target = size ?? { width: sof.width, height: sof.height };
+	if (size) {
+		// 精确的目标尺寸（--size force，长宽比的误差不到 1 像素）；不按 Orientation 转，和原图同一个方向，方向标签照搬
+		await run(
+			"vips",
+			["thumbnail", input.path, `${encoded}[${opts.join(",")}]`, String(size.width), "--height", String(size.height), "--size", "force", "--no-rotate"],
+			{ timeoutMs: 150_000 },
+		);
+	} else {
+		await run("vips", ["copy", input.path, `${encoded}[${opts.join(",")}]`], { timeoutMs: 150_000 });
+	}
+	const meta = parsed.meta.filter(keepSegment).map((seg) => (size ? patchExifSize(seg, size.width, size.height) : seg));
+	const out = spliceMeta(src, await readFile(encoded), meta);
 	if (out.length > input.size * (1 - minSaving)) return skip("not-smaller");
 
 	onStep("verify");
@@ -764,18 +827,20 @@ export async function compressTask(input, dir, { quality, minSaving, maxBytes, m
 	const check = parseJpeg(out);
 	if (
 		check.end !== out.length ||
-		check.sof?.width !== sof.width ||
-		check.sof?.height !== sof.height ||
+		check.sof?.width !== target.width ||
+		check.sof?.height !== target.height ||
 		check.sof?.components.length !== sof.components.length
 	) {
 		throw new Error("compressed image does not match the original");
 	}
 	// 完整解码一遍（截断、损坏的数据会报错）
 	await run("vips", ["avg", `${outPath}[fail_on=warning]`], { timeoutMs: 120_000 });
-	// 缩小后逐像素比对：两边方向标签一样，缩出来的尺寸也一样
+	// 缩小后逐像素比对：两边缩到同一个尺寸（缩小过分辨率的两边原尺寸不同，所以指定宽高）
 	const [a, b, d, e] = ["cmp-a.v", "cmp-b.v", "cmp-d.v", "cmp-e.v"].map((n) => join(dir, n));
-	await run("vips", ["thumbnail", input.path, a, "1024"], { timeoutMs: 60_000 });
-	await run("vips", ["thumbnail", outPath, b, "1024"], { timeoutMs: 60_000 });
+	const k = Math.min(1, 1024 / Math.max(sof.width, sof.height));
+	const cmp = [String(Math.max(1, Math.round(sof.width * k))), "--height", String(Math.max(1, Math.round(sof.height * k))), "--size", "force", "--no-rotate"];
+	await run("vips", ["thumbnail", input.path, a, ...cmp], { timeoutMs: 60_000 });
+	await run("vips", ["thumbnail", outPath, b, ...cmp], { timeoutMs: 60_000 });
 	await run("vips", ["subtract", a, b, d], { timeoutMs: 30_000 });
 	await run("vips", ["abs", d, e], { timeoutMs: 30_000 });
 	const diff = await vipsNumber(["avg", e]);
@@ -788,7 +853,7 @@ export async function compressTask(input, dir, { quality, minSaving, maxBytes, m
 		body: {
 			...base,
 			skipped: null,
-			out: { sha256: createHash("sha256").update(out).digest("hex"), size: out.length, crc32: crc32(out) >>> 0 },
+			out: { sha256: createHash("sha256").update(out).digest("hex"), size: out.length, crc32: crc32(out) >>> 0, ...target },
 		},
 		outPath,
 	};

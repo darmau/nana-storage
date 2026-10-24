@@ -343,3 +343,17 @@ export const COMPRESS_BATCH_MAX = 500;
 export const COMPRESS_TIMEOUT_MS = 3 * 60_000;
 /** 压缩后的图和原图缩到长边 1024 后，逐像素平均差值（0–255）超过它就当作出错（任务失败，原图不动）。Q90 通常在 0.5 以下。 */
 export const COMPRESS_MAX_DIFF = 2;
+/**
+ * 压缩时可以顺便缩小分辨率（原图压缩页上选，按百万像素）：超过所选像素数的按比例缩到不超过它，不放大。
+ * 只重新编码省不了多少的（not-smaller）、已经压缩过的照片也能再缩小；带附图、不是普通 JPEG 的照样不处理。
+ * 缩小后原图的像素尺寸变了，assets.width / height 跟着改，EXIF 里的像素尺寸也改成新的。
+ */
+export const COMPRESS_TARGET_PIXELS = [24_000_000, 16_000_000, 12_000_000] as const;
+/**
+ * 不压缩的原因（asset_files.compress_skip，lib.mjs 的 compressTask 的 skipped）。前四种重新编码、缩小都不能处理；
+ * not-smaller 只是不值得，选了缩小分辨率时还能再处理。迁移 0028 之前跳过的没有记原因（NULL）。
+ */
+export const COMPRESS_SKIP_REASONS = ["not-jpeg", "colourspace", "extra-data", "too-large", "not-smaller"] as const;
+export type CompressSkipReason = (typeof COMPRESS_SKIP_REASONS)[number];
+/** 缩小分辨率也处理不了的原因。 */
+export const COMPRESS_HARD_SKIPS: readonly CompressSkipReason[] = ["not-jpeg", "colourspace", "extra-data", "too-large"];

@@ -119,7 +119,11 @@ export interface CompressOutput {
 	sha256: string;
 	size: number;
 	skipped: string | null;
-	out: { sha256: string; size: number; crc32: number } | null;
+	/** 原图存储方向的像素尺寸（旧版设备端没有） */
+	width?: number | null;
+	height?: number | null;
+	/** width / height 是压缩后的（缩小过分辨率时和原图不同；旧版设备端没有） */
+	out: { sha256: string; size: number; crc32: number; width?: number; height?: number } | null;
 }
 
 const poolName = (i: number) => `proc-${i}`;
@@ -334,7 +338,7 @@ export class Processor extends DurableObject<Env> {
 	 * 原图压缩：容器返回 JSON + 压缩后的 JPEG，后半段直接流进 R2 的 outputKey（一个新 key，原图不动）。
 	 * R2 按容器算的 sha256 校验写入的字节，对不上就写入失败。是否换掉原图由调用方（src/compress.ts）决定。
 	 */
-	async compress(inputKey: string, outputKey: string): Promise<Result<CompressOutput>> {
+	async compress(inputKey: string, outputKey: string, maxPixels = 0): Promise<Result<CompressOutput>> {
 		return this.call(
 			"compress",
 			inputKey,
@@ -343,6 +347,7 @@ export class Processor extends DurableObject<Env> {
 				"x-min-saving": String(COMPRESS_MIN_SAVING),
 				"x-max-bytes": String(COMPRESS_MAX_BYTES),
 				"x-max-diff": String(COMPRESS_MAX_DIFF),
+				"x-max-pixels": String(maxPixels),
 			},
 			COMPRESS_TIMEOUT_MS,
 			async (res) => {
@@ -353,7 +358,7 @@ export class Processor extends DurableObject<Env> {
 				const body = JSON.parse(new TextDecoder().decode(head)) as CompressOutput;
 				if (!body.out) {
 					await rest.cancel().catch(() => {});
-					return { sha256: body.sha256, size: body.size, skipped: body.skipped ?? "unknown", out: null };
+					return { ...body, skipped: body.skipped ?? "unknown", out: null };
 				}
 				if (total - jsonLength !== body.out.size) throw new Error("compress returned a wrong length");
 				const fixed = new FixedLengthStream(body.out.size);
@@ -362,7 +367,7 @@ export class Processor extends DurableObject<Env> {
 					this.env.PHOTOS.put(outputKey, fixed.readable, { httpMetadata: { contentType: "image/jpeg" }, sha256: body.out.sha256 }),
 				]);
 				if (written.size !== body.out.size) throw new Error("compress output size mismatch");
-				return { sha256: body.sha256, size: body.size, skipped: null, out: body.out };
+				return { ...body, skipped: null };
 			},
 		);
 	}

@@ -100,7 +100,7 @@ export interface DevicePlan {
 	/** 普通视频：设备按自己读到的时长决定是否转码（不超过 maxDurationMs） */
 	transcode: { fileId: string; maxDurationMs: number } | null;
 	/** 原图压缩：参数和容器路径一样（shared 的 COMPRESS_*），压缩了就上传到 outputs.compressed。旧版设备端没有这一项（任务会失败，更新设备端即可） */
-	compress: { fileId: string; quality: number; minSaving: number; maxBytes: number; maxDiff: number } | null;
+	compress: { fileId: string; quality: number; minSaving: number; maxBytes: number; maxDiff: number; maxPixels: number } | null;
 	/** 要上传的派生文件：名字 → R2 key */
 	outputs: Partial<Record<OutputName, string>>;
 	info: DeviceJobInfo;
@@ -191,6 +191,8 @@ export async function planJob(env: Env, job: Pick<JobRow, "id" | "asset_id" | "k
 				minSaving: COMPRESS_MIN_SAVING,
 				maxBytes: COMPRESS_MAX_BYTES,
 				maxDiff: COMPRESS_MAX_DIFF,
+				// 缩小分辨率的上限（0 不缩小）；旧版设备端忽略它时 compressAsset 发现没缩小，任务失败
+				maxPixels: original.compress_target ?? 0,
 			};
 			plan.outputs.compressed = compressedKey(job);
 		}
@@ -250,7 +252,18 @@ const CompressResult = z.object({
 	sha256: Sha,
 	size: z.number().int().nonnegative(),
 	skipped: z.string().max(64).nullable(),
-	out: z.object({ sha256: Sha, size: z.number().int().positive(), crc32: z.number().int().nonnegative() }).nullable(),
+	/** 原图和压缩后的像素尺寸（旧版设备端没有） */
+	width: z.number().int().positive().nullable().optional(),
+	height: z.number().int().positive().nullable().optional(),
+	out: z
+		.object({
+			sha256: Sha,
+			size: z.number().int().positive(),
+			crc32: z.number().int().nonnegative(),
+			width: z.number().int().positive().optional(),
+			height: z.number().int().positive().optional(),
+		})
+		.nullable(),
 });
 export const DeviceResults = z.object({
 	derive: DeriveResult.nullable().default(null),
@@ -313,9 +326,11 @@ export function precomputedProcessor(env: Env, plan: DevicePlan, results: Device
 			const r = fileId ? results.meta[fileId] : undefined;
 			return r ? done(r) : fail("meta unexpected call or missing result");
 		},
-		async compress(inputKey: string, outputKey: string) {
+		async compress(inputKey: string, outputKey: string, maxPixels = 0) {
 			const p = plan.compress;
-			if (!p || keys.get(p.fileId) !== inputKey || plan.outputs.compressed !== outputKey) return fail("compress unexpected call");
+			if (!p || keys.get(p.fileId) !== inputKey || plan.outputs.compressed !== outputKey || (p.maxPixels ?? 0) !== maxPixels) {
+				return fail("compress unexpected call");
+			}
 			const r = results.compress;
 			if (!r) return fail("compress missing result (update the device)");
 			if (r.out) {

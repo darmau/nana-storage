@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { COMPRESS_MIN_BYTES } from "@nana/shared";
+import { COMPRESS_MIN_BYTES, COMPRESS_TARGET_PIXELS } from "@nana/shared";
 import { useState } from "react";
 import { api, errorText } from "../api";
-import { t } from "../i18n";
+import { fmtNumber, t } from "../i18n";
 import { LibraryList } from "../library/LibraryList";
 import { formatBytes } from "../timeline/format";
 import { IconAlert, IconChevronRight, IconCompress, IconDuplicate, IconInfo, IconLookalike } from "../ui/icons";
@@ -71,21 +71,38 @@ interface CompressSummary {
 	candidates: { count: number; bytes: number };
 	compressed: { count: number; before: number; after: number };
 	skipped: number;
+	/** “不压缩”列表按原因的张数（unknown 是没记原因的旧数据），和列表同样的条件 */
+	reasons: Record<string, number>;
 	queued: number;
 	failed: number;
 }
 
 /** 下限的选项（MB）。最小的就是 COMPRESS_MIN_BYTES：比它小的压了也省不了多少，服务端不列。 */
 const MIN_OPTIONS = [COMPRESS_MIN_BYTES / 1024 ** 2, 5, 10, 20, 50];
+/** 分辨率的选项：0 保持原尺寸，其余是像素上限（文案按“万像素”传） */
+const RESIZE_OPTIONS = [0, ...COMPRESS_TARGET_PIXELS];
+/** 原因的显示顺序：能靠缩小分辨率处理的在前 */
+const REASON_ORDER = ["not-smaller", "unknown", "extra-data", "not-jpeg", "colourspace", "too-large"];
+
+type CompressView = "candidates" | "compressed" | "skipped";
+
+const pill = (on: boolean) =>
+	`inline-flex h-9 items-center rounded-full px-4 text-sm font-medium transition ${on ? "bg-accent-soft text-accent-ink" : "text-fg/80 hover:bg-surface"}`;
+const chip = (on: boolean) =>
+	`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm transition ${on ? "border-accent bg-accent-soft text-accent-ink" : "border-border text-fg/80 hover:bg-surface"}`;
 
 /**
- * 原图压缩：没处理过的 JPEG 原图按大小倒序列出（可以只看某个大小以上的），选中后“压缩原图”（多选栏 / 右键菜单，
- * 见 SelectionBar 的 compress）。排上队的从列表里消失；压缩的进度在“后台处理”里看，这里只在打开、切换下限、操作之后
- * 和点“刷新”时更新，不轮询。
+ * 原图压缩：三个视图——待压缩（没处理过的 JPEG 原图按大小倒序，可以只看某个大小以上的）、已压缩、不压缩（按原因筛选，
+ * 说明为什么不压缩）。选中后“压缩原图”（多选栏 / 右键菜单，见 SelectionBar 的 compress），可以顺便缩小分辨率：
+ * 选了分辨率时，已压缩的、不值得压缩的照片超过所选像素数也能再处理。排上队的从列表里消失；进度在“后台处理”里看，
+ * 这里只在打开、切换、操作之后和点“刷新”时更新，不轮询。
  */
 export function CompressPage() {
 	useDocumentTitle(t.compress.title);
+	const [view, setView] = useState<CompressView>("candidates");
 	const [minMb, setMinMb] = useState(MIN_OPTIONS[0]!);
+	const [maxPixels, setMaxPixels] = useState<number>(0);
+	const [reason, setReason] = useState<string | undefined>();
 	const min = minMb * 1024 ** 2;
 	const summary = useQuery({
 		queryKey: ["compress", "summary", min],
@@ -93,6 +110,23 @@ export function CompressPage() {
 	});
 	const s = summary.data;
 	const refresh = () => void summary.refetch();
+	const reasons = s ? REASON_ORDER.filter((r) => (s.reasons[r] ?? 0) > 0) : [];
+	const skippedCount = s ? Object.values(s.reasons).reduce((a, b) => a + b, 0) : undefined;
+	const counts: Record<CompressView, number | undefined> = { candidates: s?.candidates.count, compressed: s?.compressed.count, skipped: skippedCount };
+	// 选中的原因已经没有照片了（都处理掉了）就回到全部
+	const activeReason = reason && reasons.includes(reason) ? reason : undefined;
+
+	const source =
+		view === "candidates"
+			? { key: ["compress", "candidates", min], path: `/compress/candidates?min=${min}` }
+			: view === "compressed"
+				? { key: ["compress", "compressed"], path: "/compress/done?state=compressed" }
+				: {
+						key: ["compress", "skipped", activeReason ?? "all"],
+						path: `/compress/done?state=skipped${activeReason ? `&reason=${activeReason}` : ""}`,
+					};
+	const empty = view === "candidates" ? t.compress.none : view === "compressed" ? t.compress.noneCompressed : t.compress.noneSkipped;
+
 	return (
 		<div className="space-y-5">
 			<div className="flex flex-wrap items-center gap-2">
@@ -106,22 +140,21 @@ export function CompressPage() {
 				<span>{t.compress.intro}</span>
 			</p>
 			{summary.error && <p className="text-sm text-danger">{errorText(summary.error)}</p>}
-			<div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-				<label className="flex items-center gap-2">
-					<span className="text-muted">{t.compress.minLabel}</span>
-					<select className="field py-1.5" value={minMb} onChange={(e) => setMinMb(Number(e.target.value))}>
-						{MIN_OPTIONS.map((mb) => (
-							<option key={mb} value={mb}>
-								{t.compress.minOption(mb)}
+			<div className="space-y-1.5 text-sm">
+				<label className="flex flex-wrap items-center gap-2">
+					<span className="text-muted">{t.compress.resizeLabel}</span>
+					<select className="field py-1.5" value={maxPixels} onChange={(e) => setMaxPixels(Number(e.target.value))}>
+						{RESIZE_OPTIONS.map((px) => (
+							<option key={px} value={px}>
+								{t.compress.resizeOption(px / 10_000)}
 							</option>
 						))}
 					</select>
 				</label>
-				{s && <span className="font-semibold tabular-nums">{t.compress.candidates(s.candidates.count, formatBytes(s.candidates.bytes))}</span>}
+				{maxPixels > 0 && <p className="text-xs text-muted">{t.compress.resizeHint}</p>}
 			</div>
-			{s && (s.compressed.count > 0 || s.skipped > 0 || s.queued > 0 || s.failed > 0) && (
+			{s && (s.queued > 0 || s.failed > 0) && (
 				<ul className="space-y-1 text-sm text-muted">
-					{s.compressed.count > 0 && <li>{t.compress.compressed(s.compressed.count, formatBytes(s.compressed.before), formatBytes(s.compressed.after))}</li>}
 					{s.queued > 0 && (
 						<li>
 							{t.compress.queued(s.queued)}{" "}
@@ -139,22 +172,75 @@ export function CompressPage() {
 							</Link>
 						</li>
 					)}
-					{s.skipped > 0 && <li>{t.compress.skipped(s.skipped)}</li>}
 				</ul>
 			)}
-			{s && s.candidates.count > 0 && (
+			<div className="flex flex-wrap items-center gap-1" role="tablist">
+				{(["candidates", "compressed", "skipped"] as const).map((v) => (
+					<button key={v} type="button" role="tab" aria-selected={view === v} className={pill(view === v)} onClick={() => setView(v)}>
+						{t.compress.views[v]}
+						{counts[v] === undefined ? "" : ` ${fmtNumber(counts[v])}`}
+					</button>
+				))}
+			</div>
+			{view === "candidates" && (
+				<div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+					<label className="flex items-center gap-2">
+						<span className="text-muted">{t.compress.minLabel}</span>
+						<select className="field py-1.5" value={minMb} onChange={(e) => setMinMb(Number(e.target.value))}>
+							{MIN_OPTIONS.map((mb) => (
+								<option key={mb} value={mb}>
+									{t.compress.minOption(mb)}
+								</option>
+							))}
+						</select>
+					</label>
+					{s && <span className="font-semibold tabular-nums">{t.compress.candidates(s.candidates.count, formatBytes(s.candidates.bytes))}</span>}
+				</div>
+			)}
+			{view === "compressed" && s && s.compressed.count > 0 && (
+				<p className="text-sm text-muted">{t.compress.compressed(s.compressed.count, formatBytes(s.compressed.before), formatBytes(s.compressed.after))}</p>
+			)}
+			{view === "skipped" && reasons.length > 0 && (
+				<div className="space-y-3">
+					<div role="group" className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+						<button type="button" aria-pressed={!activeReason} className={chip(!activeReason)} onClick={() => setReason(undefined)}>
+							{t.compress.allReasons}
+						</button>
+						{reasons.map((r) => (
+							<button
+								key={r}
+								type="button"
+								aria-pressed={activeReason === r}
+								className={chip(activeReason === r)}
+								onClick={() => setReason(activeReason === r ? undefined : r)}
+							>
+								{t.compress.reasons[r]} <span className="tabular-nums text-muted">{fmtNumber(s!.reasons[r]!)}</span>
+							</button>
+						))}
+					</div>
+					<dl className="space-y-1.5 text-sm">
+						{(activeReason ? [activeReason] : reasons).map((r) => (
+							<div key={r}>
+								<dt className="inline font-medium">{t.compress.reasons[r]}</dt>
+								<dd className="ml-2 inline text-muted">{t.compress.reasonDetails[r]}</dd>
+							</div>
+						))}
+					</dl>
+				</div>
+			)}
+			{view === "candidates" && s && s.candidates.count > 0 && (
 				<p className="flex items-center gap-2 text-xs text-muted">
 					<IconInfo size={14} className="shrink-0" />
 					{t.compress.selectHint}
 				</p>
 			)}
 			<LibraryList
-				key={min}
-				source={{ key: ["compress", "candidates", min], path: `/compress/candidates?min=${min}` }}
-				context={{ kind: "compress" }}
+				key={source.key.join("/")}
+				source={source}
+				context={{ kind: "compress", maxPixels }}
 				groupByDay={false}
 				view="list"
-				empty={t.compress.none}
+				empty={empty}
 			/>
 		</div>
 	);

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { COMPRESS_BATCH_MAX, COMPRESS_MIN_BYTES } from "@nana/shared";
+import { COMPRESS_BATCH_MAX, COMPRESS_HARD_SKIPS, COMPRESS_MIN_BYTES, COMPRESS_SKIP_REASONS, COMPRESS_TARGET_PIXELS } from "@nana/shared";
 import { guardStub } from "./guard";
 import { createJobs, type RunningJob } from "./jobs";
 import { page, offsetOf, VISIBLE } from "./library";
@@ -18,7 +18,11 @@ import { ITEM_COLUMNS } from "./timeline";
  *     条件是这一行还是任务开始时读到的那个文件，期间被换过就丢弃结果；
  *  3. 删掉旧的 R2 对象。
  * 不值得压缩（省不到 COMPRESS_MIN_SAVING）、带附图（HDR 增益图、景深图、动态照片的视频）、不是普通 JPEG 的，
- * 原图不动，记成 compress_state = 2，以后不再列出。每张最多压缩一次（compress_state = 1 之后不再是候选）。
+ * 原图不动，记成 compress_state = 2 和原因（compress_skip），不再出现在候选里，在“不压缩”列表里按原因列出。
+ *
+ * 缩小分辨率：请求时可以选一个像素上限（COMPRESS_TARGET_PIXELS，记在 compress_target 上，任务运行时读），超过的按比例缩小。
+ * 选了上限时，已压缩的、只是不值得压缩的（not-smaller、原因未知）照片只要超过上限也能再处理一次（downscalable）；
+ * 缩小之后不再超过上限，所以同一个上限下每张最多缩一次。缩小时 assets.width / height 跟着改，preview_target 不超过新的长边。
  *
  * 缩略图、预览、指纹、人脸都不变（像素基本一样），不重新处理。
  * 压缩前的 sha256 留在 source_sha256 上：重新上传同一个原始文件仍然算重复（uploads.ts）。
@@ -37,8 +41,16 @@ export const compressedKey = (job: Pick<RunningJob, "id" | "asset_id" | "attempt
 const SKIPPED = 2;
 const COMPRESSED = 1;
 
-/** 能压缩的原件：可见的照片 / Live Photo 的 JPEG 原图，没处理过。参数：无。 */
-const ELIGIBLE = `${VISIBLE} AND a.kind != 'video' AND f.role = 'original' AND f.mime = 'image/jpeg' AND f.compress_state IS NULL`;
+/** 可见的照片 / Live Photo 的 JPEG 原图。参数：无。 */
+const PLAIN = `${VISIBLE} AND a.kind != 'video' AND f.role = 'original' AND f.mime = 'image/jpeg'`;
+/** 候选：没处理过的（和部分索引 asset_files_compress 的条件一致）。参数：无。 */
+const UNPROCESSED = `${PLAIN} AND f.compress_state IS NULL`;
+const HARD = COMPRESS_HARD_SKIPS.map((r) => `'${r}'`).join(", ");
+/** 处理过、但选了像素上限 target（SQL 表达式）且超过它的：已压缩的，或者只是不值得压缩的。 */
+const downscalable = (target: string) =>
+	`(${target} > 0 AND f.compress_state IS NOT NULL AND COALESCE(f.compress_skip, '') NOT IN (${HARD}) AND a.width * a.height > ${target})`;
+/** 任务运行时能处理的：没处理过的，或者按请求时记下的像素上限还能缩小的。参数：无。 */
+const ELIGIBLE = `${PLAIN} AND (f.compress_state IS NULL OR ${downscalable("f.compress_target")})`;
 
 class CompressError extends Error {
 	constructor(
@@ -55,12 +67,16 @@ interface OriginalRow {
 	r2_key: string;
 	size: number;
 	sha256: string | null;
+	/** 请求时选的像素上限（0 / NULL 不缩小） */
+	compress_target: number | null;
+	/** assets.width × height（容器没返回尺寸时用它判断该不该缩小） */
+	pixels: number | null;
 }
 
 /** 这个条目现在能不能压缩；能的话返回原件那一行。设备端的计划（device.ts）也用它。 */
 export async function compressible(env: Env, assetId: string): Promise<OriginalRow | null> {
 	return env.DB.prepare(
-		`SELECT f.id AS file_id, f.r2_key, f.size, f.sha256 FROM assets a JOIN asset_files f ON f.asset_id = a.id
+		`SELECT f.id AS file_id, f.r2_key, f.size, f.sha256, f.compress_target, a.width * a.height AS pixels FROM assets a JOIN asset_files f ON f.asset_id = a.id
 		 WHERE a.id = ? AND ${ELIGIBLE}`,
 	)
 		.bind(assetId)
@@ -76,7 +92,8 @@ export async function compressAsset(
 	const file = await compressible(env, job.asset_id);
 	if (!file) return { containerSeconds: 0 };
 	const outputKey = compressedKey(job);
-	const r = await getProcessor(env, job.slot).compress(file.r2_key, outputKey);
+	const target = file.compress_target ?? 0;
+	const r = await getProcessor(env, job.slot).compress(file.r2_key, outputKey, target);
 	const seconds = r.containerSeconds;
 	// 新 key 只有这个任务会写；没换上去就删掉（不存在也不报错）
 	const fail = async (message: string, permanent = false): Promise<never> => {
@@ -88,23 +105,53 @@ export async function compressAsset(
 	if (c.sha256 !== file.sha256 || c.size !== file.size) return fail("integrity check failed (sha256/size mismatch)", true);
 
 	if (!c.out) {
-		await env.DB.prepare("UPDATE asset_files SET compress_state = ? WHERE id = ? AND r2_key = ? AND compress_state IS NULL")
-			.bind(SKIPPED, file.file_id, file.r2_key)
+		// 已压缩过的再缩小时省不到 COMPRESS_MIN_SAVING：仍然算已压缩，只记下原因
+		const reason = (COMPRESS_SKIP_REASONS as readonly (string | null)[]).includes(c.skipped) ? c.skipped : null;
+		await env.DB.prepare(
+			"UPDATE asset_files SET compress_state = CASE WHEN compress_state = ? THEN ? ELSE ? END, compress_skip = ? WHERE id = ? AND r2_key = ?",
+		)
+			.bind(COMPRESSED, COMPRESSED, SKIPPED, reason, file.file_id, file.r2_key)
 			.run();
 		await env.PHOTOS.delete(outputKey).catch(() => {});
 		console.log(JSON.stringify({ event: "compress_skipped", assetId: job.asset_id, reason: c.skipped }));
 		return { containerSeconds: seconds };
 	}
 
-	// SQLite 的 UPDATE 里右边的列都是修改之前的值：source_sha256 / source_size 记的是原图的
-	let updated: { id: string } | null;
+	// 像素尺寸：该缩小的必须缩到上限以内（旧版设备端不认识上限、也不返回尺寸，任务失败，更新设备端后重试即可）；没要求缩小的不能变
+	const inW = c.width ?? null;
+	const inH = c.height ?? null;
+	const outW = c.out.width ?? inW;
+	const outH = c.out.height ?? inH;
+	const wantResize = target > 0 && (inW !== null && inH !== null ? inW * inH : (file.pixels ?? 0)) > target;
+	if (wantResize && !(outW && outH && outW * outH <= target)) return fail("compress ignored the resolution limit (update the device)");
+	const resized = inW !== null && inH !== null && outW !== null && outH !== null && (outW !== inW || outH !== inH);
+	if (resized && !wantResize) return fail("compress changed the image size", true);
+
+	// SQLite 的 UPDATE 里右边的列都是修改之前的值：source_sha256 / source_size 记的是最早那份原图的（压缩过再缩小时不覆盖）
+	const swap = [
+		env.DB.prepare(
+			`UPDATE asset_files SET r2_key = ?, size = ?, sha256 = ?, crc32 = ?, source_sha256 = COALESCE(source_sha256, sha256),
+				source_size = COALESCE(source_size, size), compress_state = ?, compress_skip = NULL
+			 WHERE id = ? AND r2_key = ? AND sha256 = ? RETURNING id`,
+		).bind(outputKey, c.out.size, c.out.sha256, c.out.crc32, COMPRESSED, file.file_id, file.r2_key, file.sha256),
+	];
+	if (resized) {
+		// assets.width / height 是显示方向的（可能和文件里存的方向对调），按对应关系换；对不上的（没有 EXIF 尺寸时用的预览尺寸）不动。
+		// 同一个 batch 里，只有原件确实换成了新文件才改
+		swap.push(
+			env.DB.prepare(
+				`UPDATE assets SET
+					width = CASE WHEN width = ?1 AND height = ?2 THEN ?3 WHEN width = ?2 AND height = ?1 THEN ?4 ELSE width END,
+					height = CASE WHEN width = ?1 AND height = ?2 THEN ?4 WHEN width = ?2 AND height = ?1 THEN ?3 ELSE height END,
+					preview_target = CASE WHEN preview_target > ?5 THEN ?5 ELSE preview_target END
+				 WHERE id = ?6 AND EXISTS (SELECT 1 FROM asset_files WHERE id = ?7 AND r2_key = ?8)`,
+			).bind(inW, inH, outW, outH, Math.max(outW!, outH!), job.asset_id, file.file_id, outputKey),
+		);
+	}
+	let updated: { id: string } | undefined;
 	try {
-		updated = await env.DB.prepare(
-			`UPDATE asset_files SET r2_key = ?, size = ?, sha256 = ?, crc32 = ?, source_sha256 = sha256, source_size = size, compress_state = ?
-			 WHERE id = ? AND r2_key = ? AND sha256 = ? AND compress_state IS NULL RETURNING id`,
-		)
-			.bind(outputKey, c.out.size, c.out.sha256, c.out.crc32, COMPRESSED, file.file_id, file.r2_key, file.sha256)
-			.first<{ id: string }>();
+		const [res] = await env.DB.batch<{ id: string }>(swap);
+		updated = res?.results[0];
 	} catch (e) {
 		// 压缩后的字节恰好和另一张原图完全一样（去重的唯一索引）：不换
 		return fail(`compress: ${String(e).slice(0, 300)}`, true);
@@ -120,7 +167,7 @@ export async function compressAsset(
 		// 已经没有记录引用旧文件了，只是多占一点空间；日志里留下 key，必要时手动清理
 		console.warn(JSON.stringify({ event: "compress_orphan", assetId: job.asset_id, key: file.r2_key, error: String(e).slice(0, 300) }));
 	}
-	console.log(JSON.stringify({ event: "compress_done", assetId: job.asset_id, before: file.size, after: c.out.size }));
+	console.log(JSON.stringify({ event: "compress_done", assetId: job.asset_id, before: file.size, after: c.out.size, resized }));
 	return { containerSeconds: seconds };
 }
 
@@ -144,7 +191,7 @@ const NOT_QUEUED = "NOT EXISTS (SELECT 1 FROM jobs j WHERE j.asset_id = a.id AND
  */
 const CANDIDATES = `SELECT ${ITEM_COLUMNS}, a.file_name, f.size AS file_size, a.taken_at, a.tz_offset_min, a.created_at
 	FROM asset_files f INDEXED BY asset_files_compress CROSS JOIN assets a ON a.id = f.asset_id
-	WHERE ${ELIGIBLE} AND f.size >= ? AND ${NOT_QUEUED}
+	WHERE ${UNPROCESSED} AND f.size >= ? AND ${NOT_QUEUED}
 	ORDER BY f.size DESC, f.id`;
 
 compress.get("/candidates", async (c) =>
@@ -152,16 +199,37 @@ compress.get("/candidates", async (c) =>
 );
 
 /**
+ * 处理过的原图：state=compressed 已压缩，state=skipped 不压缩（可以按原因筛选：reason=not-smaller …，unknown 是没记原因的旧数据）。
+ * 按原图大小倒序（asset_files_compress_done），排队中的不列；格式和候选一样。选了像素上限时这两种里超过上限的还能再缩小。
+ */
+compress.get("/done", async (c) => {
+	const state = c.req.query("state") === "compressed" ? COMPRESSED : SKIPPED;
+	const reason = c.req.query("reason");
+	let filter = "";
+	const params: unknown[] = [];
+	if (state === SKIPPED && reason === "unknown") filter = "AND f.compress_skip IS NULL";
+	else if (state === SKIPPED && (COMPRESS_SKIP_REASONS as readonly string[]).includes(reason ?? "")) {
+		filter = "AND f.compress_skip = ?";
+		params.push(reason);
+	}
+	const sql = `SELECT ${ITEM_COLUMNS}, a.file_name, f.size AS file_size, a.taken_at, a.tz_offset_min, a.created_at
+		FROM asset_files f INDEXED BY asset_files_compress_done CROSS JOIN assets a ON a.id = f.asset_id
+		WHERE f.compress_state = ${state} ${filter} AND ${PLAIN} AND ${NOT_QUEUED}
+		ORDER BY f.size DESC, f.id`;
+	return c.json(await page(c.env, sql, params, offsetOf(c.req.query("offset")), { details: true }));
+});
+
+/**
  * 页头的数字：下限以上的候选张数和总大小（和列表一样不含排队中的）、已压缩的张数和省下的空间、不压缩的张数、排队 / 失败的任务数。
  * 只在打开页面、改下限和操作之后请求。候选按索引读到下限为止，已压缩的只扫处理过的行。
  */
 compress.get("/summary", async (c) => {
 	const env = c.env;
-	const [candidates, done, jobs] = await env.DB.batch<Record<string, number | null>>([
+	const [candidates, done, jobs, reasons] = await env.DB.batch<Record<string, number | string | null>>([
 		env.DB.prepare(
 			`SELECT COUNT(*) AS n, COALESCE(SUM(f.size), 0) AS bytes
 			 FROM asset_files f INDEXED BY asset_files_compress CROSS JOIN assets a ON a.id = f.asset_id
-			 WHERE ${ELIGIBLE} AND f.size >= ? AND ${NOT_QUEUED}`,
+			 WHERE ${UNPROCESSED} AND f.size >= ? AND ${NOT_QUEUED}`,
 		).bind(minOf(c.req.query("min"))),
 		env.DB.prepare(
 			`SELECT COALESCE(SUM(compress_state = 1), 0) AS compressed, COALESCE(SUM(compress_state = 2), 0) AS skipped,
@@ -173,24 +241,40 @@ compress.get("/summary", async (c) => {
 			`SELECT COALESCE(SUM(status IN ('pending', 'running')), 0) AS queued, COALESCE(SUM(status = 'failed'), 0) AS failed
 			 FROM jobs WHERE kind = 'compress' AND status IN ('pending', 'running', 'failed')`,
 		),
+		// “不压缩”列表的原因筛选：和列表同样的条件（可见、没在排队），按原因计数
+		env.DB.prepare(
+			`SELECT COALESCE(f.compress_skip, 'unknown') AS reason, COUNT(*) AS n
+			 FROM asset_files f INDEXED BY asset_files_compress_done CROSS JOIN assets a ON a.id = f.asset_id
+			 WHERE f.compress_state = ${SKIPPED} AND ${PLAIN} AND ${NOT_QUEUED}
+			 GROUP BY 1`,
+		),
 	]);
-	const [cand, d, j] = [candidates!.results[0]!, done!.results[0]!, jobs!.results[0]!];
+	const [cand, d, j] = [candidates!.results[0]!, done!.results[0]!, jobs!.results[0]!] as Record<string, number | null>[];
 	return c.json({
-		candidates: { count: cand.n ?? 0, bytes: cand.bytes ?? 0 },
-		compressed: { count: d.compressed ?? 0, before: d.before ?? 0, after: d.after ?? 0 },
-		skipped: d.skipped ?? 0,
-		queued: j.queued ?? 0,
-		failed: j.failed ?? 0,
+		candidates: { count: cand!.n ?? 0, bytes: cand!.bytes ?? 0 },
+		compressed: { count: d!.compressed ?? 0, before: d!.before ?? 0, after: d!.after ?? 0 },
+		skipped: d!.skipped ?? 0,
+		reasons: Object.fromEntries(reasons!.results.map((r) => [r.reason as string, r.n as number])),
+		queued: j!.queued ?? 0,
+		failed: j!.failed ?? 0,
 	});
 });
 
+/** 像素上限：0（不缩小）或 COMPRESS_TARGET_PIXELS 里的一档。会拼进 SQL，只能是这几个整数。 */
+const TARGET = z
+	.number()
+	.int()
+	.refine((n) => n === 0 || (COMPRESS_TARGET_PIXELS as readonly number[]).includes(n));
+
 /**
- * 压缩选中的照片：只给现在能压缩、没有排队 / 运行中任务的条目建任务（其余算 skipped）。熔断时拒绝。
- * 只由用户点击触发，每次最多 COMPRESS_BATCH_MAX 张。
+ * 压缩选中的照片：只给现在能压缩（没处理过，或者选了像素上限 maxPixels 且还能缩小）、没有排队 / 运行中任务的条目建任务
+ * （其余算 skipped），并在原件上记下这次选的上限。熔断时拒绝。只由用户点击触发，每次最多 COMPRESS_BATCH_MAX 张。
  */
 compress.post("/", async (c) => {
 	const env = c.env;
-	const { ids } = z.object({ ids: z.array(ID).min(1).max(COMPRESS_BATCH_MAX) }).parse(await c.req.json());
+	const { ids, maxPixels } = z
+		.object({ ids: z.array(ID).min(1).max(COMPRESS_BATCH_MAX), maxPixels: TARGET.default(0) })
+		.parse(await c.req.json());
 	const unique = [...new Set(ids)];
 	if (await guardStub(env).isTripped()) return c.json({ error: "guard tripped" }, 503);
 	const eligible: string[] = [];
@@ -198,12 +282,19 @@ compress.post("/", async (c) => {
 		const chunk = unique.slice(i, i + 80);
 		const { results } = await env.DB.prepare(
 			`SELECT a.id FROM assets a JOIN asset_files f ON f.asset_id = a.id
-			 WHERE a.id IN (${chunk.map(() => "?").join(",")}) AND ${ELIGIBLE}
+			 WHERE a.id IN (${chunk.map(() => "?").join(",")}) AND ${PLAIN} AND (f.compress_state IS NULL OR ${downscalable(String(maxPixels))})
 			   AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.asset_id = a.id AND j.status IN ('pending', 'running'))`,
 		)
 			.bind(...chunk)
 			.all<{ id: string }>();
 		eligible.push(...results.map((r) => r.id));
+	}
+	// 先记下上限再建任务：任务（包括之后的重试）运行时读它
+	for (let i = 0; i < eligible.length; i += 80) {
+		const chunk = eligible.slice(i, i + 80);
+		await env.DB.prepare(`UPDATE asset_files SET compress_target = ? WHERE role = 'original' AND asset_id IN (${chunk.map(() => "?").join(",")})`)
+			.bind(maxPixels, ...chunk)
+			.run();
 	}
 	const queued = eligible.length ? await createJobs(env, eligible, "compress") : 0;
 	return c.json({ queued, skipped: unique.length - queued });

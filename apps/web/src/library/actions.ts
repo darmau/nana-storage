@@ -25,16 +25,16 @@ export async function batch(qc: QueryClient, ids: string[], action: BatchAction)
 	return res;
 }
 
-/** 原图压缩：给选中的照片建任务（服务端每次最多 COMPRESS_BATCH_MAX 张，按批发），返回排上队和跳过的张数。 */
-export async function compressOriginals(qc: QueryClient, ids: string[]) {
+/** 原图压缩：给选中的照片建任务（服务端每次最多 COMPRESS_BATCH_MAX 张，按批发；maxPixels 是分辨率上限，0 不缩小），返回排上队和跳过的张数。 */
+export async function compressOriginals(qc: QueryClient, ids: string[], maxPixels = 0) {
 	let queued = 0;
 	let skipped = 0;
 	for (let i = 0; i < ids.length; i += COMPRESS_BATCH_MAX) {
-		const r = await api<{ queued: number; skipped: number }>("/compress", { method: "POST", json: { ids: ids.slice(i, i + COMPRESS_BATCH_MAX) } });
+		const r = await api<{ queued: number; skipped: number }>("/compress", { method: "POST", json: { ids: ids.slice(i, i + COMPRESS_BATCH_MAX), maxPixels } });
 		queued += r.queued;
 		skipped += r.skipped;
 	}
-	// 页头的数字和候选列表（列表的 key 是 ["list", "compress", …]，见 listQuery）
+	// 页头的数字和三个列表（列表的 key 是 ["list", "compress", …]，见 listQuery）
 	void qc.invalidateQueries({ queryKey: ["compress"] });
 	void qc.invalidateQueries({ queryKey: ["list", "compress"] });
 	void qc.invalidateQueries({ queryKey: ["jobs"] });

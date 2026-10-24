@@ -118,6 +118,7 @@ export async function runJob(api, plan, progress = {}, local = null) {
 				minSaving: c.minSaving,
 				maxBytes: c.maxBytes,
 				maxDiff: c.maxDiff,
+				maxPixels: c.maxPixels ?? 0,
 				onStep: (step) => (progress.step = step),
 			});
 			results.compress = r.body;
