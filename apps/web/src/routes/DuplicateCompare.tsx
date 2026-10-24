@@ -4,7 +4,7 @@ import { locale, t } from "../i18n";
 import { api } from "../api";
 import { formatBytes } from "../timeline/format";
 import { previewUrl, thumbUrl, type TimelineItem } from "../timeline/types";
-import { IconChevronLeft, IconChevronRight, IconClose } from "../ui/icons";
+import { IconChevronLeft, IconChevronRight, IconClose, IconFolder } from "../ui/icons";
 import { useThemeColor } from "../ui/themeColor";
 import type { AssetDetail } from "../viewer/types";
 
@@ -18,7 +18,7 @@ export const comparePill =
  * 当前照片前后各 PRELOAD 张的预览一直挂着，切换时不用重新加载。底部的操作按钮由页面传进来（actions）。
  */
 const PRELOAD = 2;
-/** 信息最多取这么多张（每张一次 /api/assets/:id，和查看器共用缓存） */
+/** 信息最多取这么多张（每张一次 /api/assets/:id，和查看器共用缓存）；当前这张不在其中时另外取 */
 const DETAIL_MAX = 24;
 const ZOOM = 3;
 
@@ -74,14 +74,16 @@ export function DuplicateCompare({
 	const it = items[index]!;
 	const step = (d: number) => onSelect(items[(index + d + n) % n]![0]);
 
+	const detailIds = items.slice(0, DETAIL_MAX).map((x) => x[0]);
+	if (!detailIds.includes(it[0])) detailIds.push(it[0]);
 	const details = useQueries({
-		queries: items.slice(0, DETAIL_MAX).map((x) => ({
-			queryKey: ["asset", x[0]],
-			queryFn: () => api<AssetDetail>(`/assets/${x[0]}`),
+		queries: detailIds.map((id) => ({
+			queryKey: ["asset", id],
+			queryFn: () => api<AssetDetail>(`/assets/${id}`),
 			staleTime: 60_000,
 		})),
 	});
-	const detailOf = (id: string) => details[items.findIndex((x) => x[0] === id)]?.data;
+	const detailOf = (id: string) => details[detailIds.indexOf(id)]?.data;
 	const info = (a: AssetDetail | undefined) => {
 		const original = a?.files.find((f) => f.role === "original");
 		return {
@@ -89,6 +91,7 @@ export function DuplicateCompare({
 			type: original ? mimeLabel(original.mime) : null,
 			raw: !!a?.files.some((f) => f.role === "raw"),
 			name: original?.original_name ?? null,
+			folder: a ? [t.pickers.root, ...(a.folder_path ?? []).map((f) => f.name)].join(" / ") : null,
 		};
 	};
 	const cur = detailOf(it[0]);
@@ -289,6 +292,14 @@ export function DuplicateCompare({
 						{[formatSeconds(cur?.taken_at ?? null, cur?.tz_offset_min ?? null) ?? (cur ? t.date.unknown : null), cur?.camera, curInfo.name]
 							.filter(Boolean)
 							.join(" · ") || " "}
+					</div>
+					<div className="mt-0.5 flex min-h-4 items-center justify-center gap-1 text-xs text-muted" title={curInfo.folder ?? undefined}>
+						{curInfo.folder && (
+							<>
+								<IconFolder size={14} className="shrink-0" />
+								<span className="truncate">{curInfo.folder}</span>
+							</>
+						)}
 					</div>
 				</div>
 
