@@ -1,10 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { SIMILAR_SCAN_CALLS } from "@nana/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorText } from "../api";
 import { t } from "../i18n";
-import { batch, snoozeSimilar } from "../library/actions";
+import { batch, recountSimilar, snoozeSimilar } from "../library/actions";
 import type { SimilarGroups } from "../library/queries";
 import { thumbUrl } from "../timeline/types";
 import { IconArchive, IconLookalike, IconTrash } from "../ui/icons";
@@ -14,14 +14,18 @@ import { DuplicateCompare, comparePill } from "./DuplicateCompare";
 
 /** 撤销条显示多久 */
 const UNDO_MS = 8000;
-/** 补查近邻时，每查这么多批刷新一次分组（每次刷新要重新读全部照片对） */
+/** 补查近邻时，每查这么多批刷新一次列表 */
 const REFRESH_EVERY = 10;
+/** 对比界面看到已加载的倒数第几组时加载下一页 */
+const PREFETCH_GROUPS = 3;
 
 type Group = SimilarGroups["groups"][number];
-type Done = { ids: string[]; kind: "trash" | "archive" };
+/** ids：移到回收站 / 归档的照片；group：整组（撤销后一起重新计数） */
+type Done = { ids: string[]; group: string[]; kind: "trash" | "archive" };
 
 /**
  * 相似照片：看起来差不多的照片（同一张图的各种版本、同一次拍摄里略有不同的几张），只按画面内容判断。
+ * 服务端按队列逐页给出（GET /similar-groups?cursor=，每页几十组），往下有“加载更多”，对比界面快到已加载的末尾时自动加载下一页。
  * 每组推荐保留一张，其余移到回收站或归档；“暂不处理”把这一组排到队列末尾，以后还会轮到。点开一组进入对比界面逐张看。
  * 打开页面时，还没比较过的照片由页面分批请求服务端比较（每次 SIMILAR_SCAN_BATCH 张，最多 SIMILAR_SCAN_CALLS 次，
  * 页面关掉、切到后台或出错就停），其余时候没有轮询。
@@ -29,18 +33,27 @@ type Done = { ids: string[]; kind: "trash" | "archive" };
 export function SimilarGroupsPage() {
 	useDocumentTitle(t.lookalike.title);
 	const qc = useQueryClient();
-	const [offset, setOffset] = useState(0);
-	const query = useQuery({
-		queryKey: ["similar-groups", offset],
-		queryFn: () => api<SimilarGroups>(`/similar-groups?offset=${offset}`),
+	const query = useInfiniteQuery({
+		queryKey: ["similar-groups"],
+		initialPageParam: "",
+		queryFn: ({ pageParam }) => api<SimilarGroups>(`/similar-groups${pageParam ? `?cursor=${encodeURIComponent(pageParam)}` : ""}`),
+		getNextPageParam: (last) => last.next ?? undefined,
 		staleTime: 30_000,
 	});
-	const data = query.data;
+	const data = query.data?.pages[0];
 
-	// 处理过的组先在本地藏起来，不用等重新分组（读全部照片对要一两秒）
+	// 处理过的组先在本地藏起来，不用等重新取队列
 	const [gone, setGone] = useState<ReadonlySet<string>>(() => new Set());
 	useEffect(() => setGone(new Set()), [query.dataUpdatedAt]);
-	const groups = (data?.groups ?? []).filter((g) => !gone.has(g.keep));
+	// 同一张照片可能和两页里的两个中心都像：只留先出现的那组
+	const seen = new Set<string>();
+	const groups = (query.data?.pages ?? [])
+		.flatMap((p) => p.groups)
+		.filter((g) => {
+			if (gone.has(g.keep) || g.items.some((i) => seen.has(i[0]))) return false;
+			for (const i of g.items) seen.add(i[0]);
+			return true;
+		});
 	const hide = (g: Group) => setGone((s) => new Set(s).add(g.keep));
 	const others = (g: Group, keep: string) => g.items.map((i) => i[0]).filter((id) => id !== keep);
 
@@ -51,12 +64,14 @@ export function SimilarGroupsPage() {
 		if (!needsScan) return;
 		let stopped = false;
 		void (async () => {
-			setScan((s) => ({ running: true, pending: s?.pending ?? data!.pending }));
+			let pending = data!.pending;
+			setScan({ running: true, pending });
 			try {
 				for (let i = 0; i < SIMILAR_SCAN_CALLS && !stopped && !document.hidden; i++) {
-					const r = await api<{ scanned: number; pending: number }>("/similar-groups/scan", { method: "POST" });
+					const r = await api<{ scanned: number }>("/similar-groups/scan", { method: "POST" });
 					if (stopped) return;
-					setScan({ running: true, pending: r.pending });
+					pending = Math.max(0, pending - r.scanned);
+					setScan({ running: true, pending });
 					if (!r.scanned) break;
 					if (i % REFRESH_EVERY === REFRESH_EVERY - 1) void qc.invalidateQueries({ queryKey: ["similar-groups"] });
 				}
@@ -82,6 +97,7 @@ export function SimilarGroupsPage() {
 	const act = useMutation({
 		mutationFn: async (d: Done) => {
 			await batch(qc, d.ids, d.kind === "trash" ? { action: "trash" } : { action: "archive", value: true });
+			await recountSimilar(qc, d.group);
 			return d;
 		},
 		onSuccess: (d) => {
@@ -91,14 +107,17 @@ export function SimilarGroupsPage() {
 		},
 	});
 	const revert = useMutation({
-		mutationFn: (d: Done) => batch(qc, d.ids, d.kind === "trash" ? { action: "restore" } : { action: "archive", value: false }),
+		mutationFn: async (d: Done) => {
+			await batch(qc, d.ids, d.kind === "trash" ? { action: "restore" } : { action: "archive", value: false });
+			await recountSimilar(qc, d.group);
+		},
 		onSuccess: () => setUndo(null),
 	});
 	const snooze = useMutation({ mutationFn: (g: Group) => snoozeSimilar(qc, g.items.map((i) => i[0])) });
 	const busy = act.isPending || snooze.isPending || revert.isPending;
 	const keepOnly = (g: Group, keep: string, kind: Done["kind"], then?: () => void) =>
 		act.mutate(
-			{ ids: others(g, keep), kind },
+			{ ids: others(g, keep), group: g.items.map((i) => i[0]), kind },
 			{
 				onSuccess: () => {
 					then?.();
@@ -134,6 +153,11 @@ export function SimilarGroupsPage() {
 	useEffect(() => {
 		if (search.a && data && !query.isFetching && gi < 0) close();
 	}, [search.a, data, query.isFetching, gi, close]);
+	// 对比界面快到已加载的末尾时加载下一页
+	const { hasNextPage, isFetchingNextPage, fetchNextPage } = query;
+	useEffect(() => {
+		if (gi >= 0 && gi >= groups.length - PREFETCH_GROUPS && hasNextPage && !isFetchingNextPage) void fetchNextPage();
+	}, [gi, groups.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
 	/** 当前组处理完之后去哪：下一组，没有就上一组，都没有就关闭。 */
 	const afterGroup = (i: number) => {
 		const g = groups[i + 1] ?? groups[i - 1];
@@ -157,11 +181,11 @@ export function SimilarGroupsPage() {
 				{data?.unavailable && <p className="text-sm text-muted">{t.lookalike.unavailable}</p>}
 				{data && (
 					<p className="text-sm text-muted" role="status">
-						{t.lookalike.summary(data.total, data.fingerprints, data.truncated)}
+						{t.lookalike.listed(groups.length, !!hasNextPage)}
 						{pending > 0 && !data.unavailable && ` ${scan?.running ? t.lookalike.scanning(pending) : t.lookalike.waiting(pending)}`}
 					</p>
 				)}
-				{data?.total === 0 && pending === 0 && <p className="py-10 text-center text-sm text-muted">{t.lookalike.none}</p>}
+				{data && !groups.length && !hasNextPage && pending === 0 && <p className="py-10 text-center text-sm text-muted">{t.lookalike.none}</p>}
 				<ul className="space-y-3">
 					{groups.map((g) => (
 						<li key={g.keep} className="rounded-2xl border border-border bg-card p-3">
@@ -207,13 +231,10 @@ export function SimilarGroupsPage() {
 						</li>
 					))}
 				</ul>
-				{data && (offset > 0 || data.next !== null) && (
-					<div className="flex justify-center gap-2">
-						<button className="btn" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 100))}>
-							{t.common.prevPage}
-						</button>
-						<button className="btn" disabled={data.next === null} onClick={() => data.next !== null && setOffset(data.next)}>
-							{t.common.nextPage}
+				{hasNextPage && (
+					<div className="flex justify-center">
+						<button className="btn" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+							{t.lookalike.loadMore}
 						</button>
 					</div>
 				)}

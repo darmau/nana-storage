@@ -183,40 +183,49 @@ export async function saveFingerprint(env: Env, assetId: string, fp: Fingerprint
 		).bind(assetId, FP_MODEL_VER, parsed.phash, ...bands, blobOf(parsed.embedding), vectorized ? 1 : 0, now),
 		env.DB.prepare("DELETE FROM similar_pairs WHERE a = ?1 OR b = ?1").bind(assetId),
 	]);
-	await savePairs(env, assetId, parsed.phash, bands, parsed.embedding);
+	await updateDuplicatePairs(env, [{ id: assetId, phash: parsed.phash, embedding: parsed.embedding }]);
 	await scoreForSmartSets(env, assetId, parsed.embedding);
 	return true;
 }
 
 /**
- * 更新这张照片的候选重复对：按 5 段哈希查可能的近邻（每段都有索引，最多 DUPLICATE_NEIGHBOR_MAX 个），
- * 留下汉明距离以内、照片 / 视频一致、向量也几乎一样的，和删掉旧的候选对放在同一个 batch 里。
+ * 更新这些照片的候选重复对：按 5 段哈希查可能的近邻（每段都有索引，每张最多 DUPLICATE_NEIGHBOR_MAX 个），
+ * 留下汉明距离以内、照片 / 视频一致、向量也几乎一样的，和删掉旧的候选对一起写入。
  * 只存不会变的条件；连拍、拍摄时间、回收站、“不是重复”在读取时过滤。
+ * 写指纹时（1 张）和补查相似照片时（scanSimilar，一批）调用；D1 按批读写（每次 batch 最多 50 条语句），不是每张几次请求。
  * 失败不影响任务：删掉 duplicate_pairs_state，下次打开“整理重复”时全量补上。
  */
-async function savePairs(env: Env, assetId: string, phash: string, bands: number[], embedding: Int8Array) {
+export async function updateDuplicatePairs(env: Env, rows: { id: string; phash: string; embedding: Int8Array }[]) {
+	if (!rows.length) return;
 	try {
-		const [self, near] = await env.DB.batch<{ id: string; phash: string; kind: string }>([
-			env.DB.prepare("SELECT id, kind FROM assets WHERE id = ?").bind(assetId),
+		const reads = rows.flatMap((r) => [
+			env.DB.prepare("SELECT id, kind FROM assets WHERE id = ?").bind(r.id),
 			env.DB.prepare(
 				`SELECT f.asset_id AS id, f.phash, a.kind FROM asset_fp f JOIN assets a ON a.id = f.asset_id
 				 WHERE (f.b0 = ? OR f.b1 = ? OR f.b2 = ? OR f.b3 = ? OR f.b4 = ?) AND f.asset_id != ? LIMIT ?`,
-			).bind(...bands, assetId, DUPLICATE_NEIGHBOR_MAX),
+			).bind(...phashBands(r.phash), r.id, DUPLICATE_NEIGHBOR_MAX),
 		]);
-		const isVideo = self!.results[0]?.kind === "video";
-		const close = near!.results.filter((r) => (r.kind === "video") === isVideo && hamming(r.phash, phash) <= DUPLICATE_MAX_HAMMING);
-		const vectors = await loadVectors(env, close.map((r) => r.id));
-		const own = normalize(embedding);
-		const keep = close.filter((r) => {
-			const v = vectors.get(r.id);
-			return !own || !v || dot(own, v) >= DUPLICATE_MIN_COSINE;
+		const results: D1Result<{ id: string; phash: string; kind: string }>[] = [];
+		for (let i = 0; i < reads.length; i += 50) results.push(...(await env.DB.batch<{ id: string; phash: string; kind: string }>(reads.slice(i, i + 50))));
+		const close = rows.map((r, k) => {
+			const isVideo = results[2 * k]!.results[0]?.kind === "video";
+			return results[2 * k + 1]!.results.filter((n) => (n.kind === "video") === isVideo && hamming(n.phash, r.phash) <= DUPLICATE_MAX_HAMMING);
 		});
-		await env.DB.batch([
-			env.DB.prepare("DELETE FROM duplicate_pairs WHERE a = ? OR b = ?").bind(assetId, assetId),
-			...insertPairs(env, keep.map((r) => [assetId, r.id])),
-		]);
+		const vectors = await loadVectors(env, [...new Set(close.flat().map((n) => n.id))]);
+		const writes = rows.flatMap((r, k) => {
+			const own = normalize(r.embedding);
+			const keep = close[k]!.filter((n) => {
+				const v = vectors.get(n.id);
+				return !own || !v || dot(own, v) >= DUPLICATE_MIN_COSINE;
+			});
+			return [
+				env.DB.prepare("DELETE FROM duplicate_pairs WHERE a = ?1 OR b = ?1").bind(r.id),
+				...insertPairs(env, keep.map((n) => [r.id, n.id])),
+			];
+		});
+		for (let i = 0; i < writes.length; i += 50) await env.DB.batch(writes.slice(i, i + 50));
 	} catch (e) {
-		console.warn(JSON.stringify({ event: "duplicate_pairs_failed", assetId, error: String(e).slice(0, 300) }));
+		console.warn(JSON.stringify({ event: "duplicate_pairs_failed", count: rows.length, error: String(e).slice(0, 300) }));
 		await env.DB.prepare("DELETE FROM duplicate_pairs_state").run().catch(() => {});
 	}
 }
@@ -380,6 +389,14 @@ async function embeddingOf(env: Env, assetId: string): Promise<Int8Array | null>
 		.bind(assetId, FP_MODEL_VER)
 		.first<{ embedding: ArrayBuffer }>();
 	return row ? asInt8(row.embedding) : null;
+}
+
+/** 已经进索引、还没查过相似照片（scanSimilar）的张数（部分索引 asset_fp_similar_pending，查完之后是 0 行）。 */
+export async function similarPending(env: Env): Promise<number> {
+	const row = await env.DB.prepare(
+		"SELECT COUNT(*) AS n FROM asset_fp INDEXED BY asset_fp_similar_pending WHERE similar_at IS NULL AND indexed = 1",
+	).first<{ n: number }>();
+	return row?.n ?? 0;
 }
 
 /** 相似照片：同一组连拍的其他照片不算（已经在连拍页里了）。 */
@@ -682,7 +699,8 @@ similar.get("/duplicates", async (c) => {
 		total: groups.length,
 		next: offset + GROUP_PAGE < groups.length ? offset + GROUP_PAGE : null,
 		scanned: (countRes!.results[0] as { n: number }).n,
-		truncated: truncated || pairRows.length >= DUPLICATE_PAIR_MAX,
+		// 补建时被截断的部分由补查相似照片（scanSimilar）逐张补上，查完就不再是“只检查了一部分”
+		truncated: (truncated && (await similarPending(c.env)) > 0) || pairRows.length >= DUPLICATE_PAIR_MAX,
 	});
 });
 

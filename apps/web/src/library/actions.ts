@@ -95,6 +95,12 @@ export async function snoozeSimilar(qc: QueryClient, ids: string[]) {
 	return res;
 }
 
+/** 一组相似照片移到回收站 / 归档（或撤销）之后，让服务端重算它们在待整理队列里的位置。 */
+export async function recountSimilar(qc: QueryClient, ids: string[]) {
+	await api<{ ok: true }>("/similar-groups/recount", { method: "POST", json: { ids } });
+	void qc.invalidateQueries({ queryKey: ["similar-groups"] });
+}
+
 /** 标记为“不是重复”（pivot：只有这张和其他几张不是），undo 为 true 时撤销同样的标记。 */
 export async function ignoreDuplicates(qc: QueryClient, ids: string[], pivot?: string, undo = false) {
 	const res = await api<{ pairs: number }>(`/duplicates/${undo ? "unignore" : "ignore"}`, { method: "POST", json: { ids, pivot } });

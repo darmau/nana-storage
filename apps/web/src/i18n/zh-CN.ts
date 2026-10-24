@@ -643,8 +643,8 @@ export const zhCN = {
 		dialog: "对比相似照片",
 		intro:
 			"这里列出看起来差不多的照片：同一张图的不同版本（缩放、裁切、加水印、截图），或者同一次拍摄里姿势、表情略有不同的几张。只看画面内容，不看拍摄时间；两张都认出了人物时，至少要有一个相同的人。推荐保留的一张依次按收藏、有 RAW、分辨率、文件大小挑选。拿不准的点“暂不处理”，这一组会排到最后，以后还会轮到。",
-		summary: (groups: number, photos: number, truncated: boolean) =>
-			`${fmtNumber(groups)} 组，比较了 ${fmtNumber(photos)} 张有指纹的照片${truncated ? "（相似的照片太多，只分了一部分）" : ""}。`,
+		listed: (groups: number, more: boolean) => `已列出 ${fmtNumber(groups)} 组${more ? "，还有更多" : ""}。`,
+		loadMore: "加载更多",
 		scanning: (n: number) => `正在比较，还剩 ${fmtNumber(n)} 张…`,
 		waiting: (n: number) => `还有 ${fmtNumber(n)} 张刚处理完的照片没比较，稍后会自动比较。`,
 		unavailable: "相似索引暂时不可用，新照片不会被比较。",

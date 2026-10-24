@@ -2,16 +2,27 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
 	FP_MODEL_VER,
+	SIMILAR_CENTER_SCAN_MAX,
 	SIMILAR_GROUP_MAX,
 	SIMILAR_GROUP_MIN_COSINE,
+	SIMILAR_GROUP_PAGE,
 	SIMILAR_GROUP_TOP_K,
-	SIMILAR_PAIR_MAX,
 	SIMILAR_SCAN_BATCH,
 	SIMILAR_SCAN_SETTLE_MS,
 	SIMILAR_SNOOZE_MAX,
 } from "@nana/shared";
 import { guardStub } from "./guard";
-import { KEEPER_COLUMNS, type KeeperRow, asInt8, nearest, pickKeeper, selectByIds, vectorIndex } from "./similar";
+import {
+	KEEPER_COLUMNS,
+	type KeeperRow,
+	asInt8,
+	nearest,
+	pickKeeper,
+	selectByIds,
+	similarPending,
+	updateDuplicatePairs,
+	vectorIndex,
+} from "./similar";
 import { toItem } from "./timeline";
 
 /**
@@ -19,10 +30,15 @@ import { toItem } from "./timeline";
  * 只按 CLIP 向量判断，不看拍摄时间。每组推荐保留一张，其余可以移到回收站或归档；“暂不处理”把这一组排到队列末尾。
  *
  *  - 查近邻（scanSimilar）：每张照片在向量进 Vectorize SIMILAR_SCAN_SETTLE_MS 之后查一次前 SIMILAR_GROUP_TOP_K 个，
- *    余弦达到 SIMILAR_GROUP_MIN_COSINE 的存进 similar_pairs。由每小时的 Cron 和打开页面时的分批请求（POST /similar-groups/scan）触发，
- *    上限见 limits.ts。指纹重写时（saveFingerprint）旧的照片对一起删掉，similar_at 回到 NULL，之后重新查。
- *  - 分组（GET /similar-groups）：只读照片对，两张都可见、没归档、不是视频；两张都认出了人物时，至少要有一个相同的人物
- *    （CLIP 分不太清是谁：同一场演出、同样打扮的两个人也会很像）。以一张为中心，组里每一张都和它足够像（groupSimilar）。
+ *    余弦达到 SIMILAR_GROUP_MIN_COSINE 的存进 similar_pairs，并更新两边的相似照片数（asset_fp.similar_n）。
+ *    同时补上这张照片的重复照片候选对（部署前的照片、全量补建被截断的部分都由它补齐）。
+ *    由每小时的 Cron 和打开页面时的分批请求（POST /similar-groups/scan）触发，上限见 limits.ts。
+ *    指纹重写时（saveFingerprint）旧的照片对一起删掉，similar_at 回到 NULL，之后重新查。
+ *  - 待整理队列（GET /similar-groups）：不一次算出全部分组（几十万张时照片对有上百万），而是按 similar_n 从大到小
+ *    逐个取“中心”，只读中心自己的照片对，拼成一组：组里每一张都和中心足够像，可见、没归档、不是视频；
+ *    两张都认出了人物时，至少要有一个相同的人物（CLIP 分不太清同样打扮的不同的人）。
+ *    暂不处理过的照片排在后面（按时间从早到晚轮流出现）。没有可分照片的中心把 similar_n 清零，
+ *    处理过的组由前端调用 POST /similar-groups/recount 更新（撤销时再调用一次就恢复）。
  *
  * D1 的照片对是唯一真实数据；Vectorize 的结果一律用 D1 过滤（不存在的条目不会写进去）。本地开发没有 Vectorize：
  * 不查近邻，接口带 unavailable: true。
@@ -32,11 +48,50 @@ type Bindings = { Bindings: Env };
 export const similarGroups = new Hono<Bindings>();
 
 const ID = z.string().regex(/^[0-9A-Z]{26}$/);
-const GROUP_PAGE = 100;
 /** 同时进行的 Vectorize 查询数。 */
-const QUERY_CONCURRENCY = 6;
-/** 每次 batch 写多少张照片（每张 2 条语句）。 */
-const WRITE_ROWS = 25;
+const QUERY_CONCURRENCY = 10;
+/** 每次读多少个候选中心。 */
+const CENTER_BATCH = 100;
+/** json_each 一次展开多少个 id（整批作为一个 JSON 文本参数，D1 单条语句最多 100 个参数）。 */
+const JSON_IDS = 2000;
+
+/** 能参与整理的照片：可见、没归档、不是视频。 */
+const ELIGIBLE = (t: string) => `${t}.deleted_at IS NULL AND ${t}.status = 'ready' AND ${t}.archived = 0 AND ${t}.kind != 'video'`;
+
+/** x 的相似照片数：similar_pairs 里实际的数目，不能参与整理的是 0。 */
+const COUNT_OF = (x: string) => `CASE WHEN ${ELIGIBLE(x)} THEN
+	(SELECT COUNT(*) FROM similar_pairs WHERE a = ${x}.id) + (SELECT COUNT(*) FROM similar_pairs INDEXED BY similar_pairs_b WHERE b = ${x}.id) ELSE 0 END`;
+
+/** 重新计数这些照片的相似照片数，没变的不写。 */
+function recountStatement(env: Env, ids: string[]): D1PreparedStatement {
+	return env.DB.prepare(
+		`UPDATE asset_fp SET similar_n = c.n
+		 FROM (SELECT x.id, ${COUNT_OF("x")} AS n FROM json_each(?) j CROSS JOIN assets x ON x.id = j.value) c
+		 WHERE asset_fp.asset_id = c.id AND asset_fp.similar_n != c.n`,
+	).bind(JSON.stringify(ids));
+}
+
+/**
+ * 人物有变化（合并、改人、新认出的脸）之后，“相似的照片都是别的人物”的中心（similar_n = -1）可能又能成组了：
+ * people 版本号和上次不同时把它们重新计数。只在打开页面时检查，每次 2 行读取；有变化时读写的是这些中心的行。
+ */
+async function reviveParked(env: Env) {
+	const [cv, st] = await env.DB.batch<{ v: number }>([
+		env.DB.prepare("SELECT v FROM cache_versions WHERE name = 'people'"),
+		env.DB.prepare("SELECT people_v AS v FROM similar_state WHERE id = 1"),
+	]);
+	const v = cv!.results[0]?.v ?? 0;
+	if (st!.results[0]?.v === v) return;
+	await env.DB.batch([
+		env.DB.prepare(
+			`UPDATE asset_fp SET similar_n = c.n
+			 FROM (SELECT x.id, ${COUNT_OF("x")} AS n FROM asset_fp f INDEXED BY asset_fp_similar_parked CROSS JOIN assets x ON x.id = f.asset_id
+			       WHERE f.similar_n < 0) c
+			 WHERE asset_fp.asset_id = c.id`,
+		),
+		env.DB.prepare("INSERT OR REPLACE INTO similar_state (id, people_v) VALUES (1, ?)").bind(v),
+	]);
+}
 
 // ---------------------------------------------------------------- 查近邻
 
@@ -48,78 +103,94 @@ const WRITE_ROWS = 25;
 export async function scanSimilar(env: Env, limit: number, now = Date.now()): Promise<number> {
 	if (!vectorIndex(env) || (await guardStub(env).isTripped())) return 0;
 	const { results } = await env.DB.prepare(
-		`SELECT asset_id, embedding, updated_at FROM asset_fp INDEXED BY asset_fp_similar_pending
+		`SELECT asset_id, phash, embedding, updated_at FROM asset_fp INDEXED BY asset_fp_similar_pending
 		 WHERE similar_at IS NULL AND indexed = 1 AND updated_at <= ? AND model = ? ORDER BY updated_at LIMIT ?`,
 	)
 		.bind(now - SIMILAR_SCAN_SETTLE_MS, FP_MODEL_VER, limit)
-		.all<{ asset_id: string; embedding: ArrayBuffer; updated_at: number }>();
-	const done: { id: string; updatedAt: number; near: [string, number][] }[] = [];
+		.all<{ asset_id: string; phash: string; embedding: ArrayBuffer; updated_at: number }>();
+	const done: { id: string; phash: string; embedding: Int8Array; updatedAt: number; near: [string, number][] }[] = [];
 	for (let i = 0; i < results.length; i += QUERY_CONCURRENCY) {
-		const chunk = results.slice(i, i + QUERY_CONCURRENCY);
-		const found = await Promise.all(chunk.map((r) => nearest(env, asInt8(r.embedding), SIMILAR_GROUP_TOP_K + 1, SIMILAR_GROUP_MIN_COSINE)));
+		const chunk = results.slice(i, i + QUERY_CONCURRENCY).map((r) => ({ ...r, vector: asInt8(r.embedding) }));
+		const found = await Promise.all(chunk.map((r) => nearest(env, r.vector, SIMILAR_GROUP_TOP_K + 1, SIMILAR_GROUP_MIN_COSINE)));
 		let failed = false;
 		chunk.forEach((r, k) => {
 			const near = found[k];
 			if (!near) failed = true;
-			else done.push({ id: r.asset_id, updatedAt: r.updated_at, near: near.filter((n) => n.id !== r.asset_id).map((n) => [n.id, n.score]) });
+			else
+				done.push({
+					id: r.asset_id,
+					phash: r.phash,
+					embedding: r.vector,
+					updatedAt: r.updated_at,
+					near: near.filter((n) => n.id !== r.asset_id).map((n) => [n.id, n.score]),
+				});
 		});
 		if (failed) break;
 	}
-	for (let i = 0; i < done.length; i += WRITE_ROWS) {
-		await env.DB.batch(
-			done.slice(i, i + WRITE_ROWS).flatMap((r) => [
-				// 只写还存在的条目（索引里可能残留已删除照片的向量）
-				env.DB.prepare(
-					`INSERT OR IGNORE INTO similar_pairs (a, b, score)
-					 SELECT min(?1, x.id), max(?1, x.id), json_extract(j.value, '$[1]')
-					 FROM json_each(?2) j JOIN assets x ON x.id = json_extract(j.value, '$[0]')
-					 WHERE x.id != ?1`,
-				).bind(r.id, JSON.stringify(r.near)),
-				// 期间指纹被重写过的不标记，下次重新查
-				env.DB.prepare("UPDATE asset_fp SET similar_at = ? WHERE asset_id = ? AND updated_at = ?").bind(now, r.id, r.updatedAt),
-			]),
-		);
-	}
-	if (done.length) console.log(JSON.stringify({ event: "similar_scanned", count: done.length }));
+	if (!done.length) return 0;
+	await updateDuplicatePairs(env, done);
+	const writes = done.flatMap((r) => [
+		// 只写还存在的条目（索引里可能残留已删除照片的向量）
+		env.DB.prepare(
+			`INSERT OR IGNORE INTO similar_pairs (a, b, score)
+			 SELECT min(?1, x.id), max(?1, x.id), json_extract(j.value, '$[1]')
+			 FROM json_each(?2) j JOIN assets x ON x.id = json_extract(j.value, '$[0]')
+			 WHERE x.id != ?1`,
+		).bind(r.id, JSON.stringify(r.near)),
+		// 期间指纹被重写过的不标记，下次重新查
+		env.DB.prepare("UPDATE asset_fp SET similar_at = ? WHERE asset_id = ? AND updated_at = ?").bind(now, r.id, r.updatedAt),
+	]);
+	// 这一批和它们的近邻的相似照片数（新的照片对可能让清零过的中心重新进队列）
+	writes.push(recountStatement(env, [...new Set(done.flatMap((r) => [r.id, ...r.near.map(([id]) => id)]))]));
+	for (let i = 0; i < writes.length; i += 50) await env.DB.batch(writes.slice(i, i + 50));
+	console.log(JSON.stringify({ event: "similar_scanned", count: done.length }));
 	return done.length;
 }
 
-/** 已经进索引、还没查过近邻的张数（包括还没到 SIMILAR_SCAN_SETTLE_MS 的）。 */
-async function pendingCount(env: Env): Promise<number> {
-	const row = await env.DB.prepare(
-		"SELECT COUNT(*) AS n FROM asset_fp INDEXED BY asset_fp_similar_pending WHERE similar_at IS NULL AND indexed = 1",
-	).first<{ n: number }>();
-	return row?.n ?? 0;
+// ---------------------------------------------------------------- 待整理队列
+
+/** 队列位置：1 = 没暂不处理过的（按相似照片数从多到少），2 = 暂不处理过的（按时间从早到晚）。 */
+type Cursor = { phase: 1; n: number; id: string } | { phase: 2; at: number; id: string };
+const START: Cursor = { phase: 1, n: Number.MAX_SAFE_INTEGER, id: "" };
+
+export function encodeCursor(c: Cursor): string {
+	return `${c.phase}.${c.phase === 1 ? c.n : c.at}.${c.id}`;
+}
+export function decodeCursor(s: string | undefined): Cursor {
+	const m = s?.match(/^([12])\.(\d{1,16})\.([0-9A-Z]{26})$/);
+	if (!m) return START;
+	return m[1] === "1" ? { phase: 1, n: Number(m[2]), id: m[3]! } : { phase: 2, at: Number(m[2]), id: m[3]! };
 }
 
-// ---------------------------------------------------------------- 分组
+/** 从 cur 之后取最多 limit 个能参与整理的中心。 */
+async function nextCenters(env: Env, cur: Cursor, limit: number): Promise<{ id: string; at: Cursor }[]> {
+	if (cur.phase === 1) {
+		const { results } = await env.DB.prepare(
+			`SELECT f.asset_id AS id, f.similar_n AS k FROM asset_fp f INDEXED BY asset_fp_similar_queue CROSS JOIN assets x ON x.id = f.asset_id
+			 WHERE f.similar_n > 0 AND (f.similar_n < ?1 OR (f.similar_n = ?1 AND f.asset_id > ?2)) AND ${ELIGIBLE("x")}
+			   AND NOT EXISTS (SELECT 1 FROM similar_snoozes s WHERE s.asset_id = f.asset_id)
+			 ORDER BY f.similar_n DESC, f.asset_id LIMIT ?3`,
+		)
+			.bind(cur.n, cur.id, limit)
+			.all<{ id: string; k: number }>();
+		return results.map((r) => ({ id: r.id, at: { phase: 1, n: r.k, id: r.id } }));
+	}
+	const { results } = await env.DB.prepare(
+		`SELECT s.asset_id AS id, s.snoozed_at AS k FROM similar_snoozes s INDEXED BY similar_snoozes_queue CROSS JOIN assets x ON x.id = s.asset_id
+		 WHERE (s.snoozed_at > ?1 OR (s.snoozed_at = ?1 AND s.asset_id > ?2)) AND ${ELIGIBLE("x")}
+		 ORDER BY s.snoozed_at, s.asset_id LIMIT ?3`,
+	)
+		.bind(cur.at, cur.id, limit)
+		.all<{ id: string; k: number }>();
+	return results.map((r) => ({ id: r.id, at: { phase: 2, at: r.k, id: r.id } }));
+}
 
-/**
- * 以一张为中心分组：按相似的照片数从多到少挑中心，组里是中心和它还没被分走的相似照片（按相似度从高到低，最多 max 张）。
- * 组里每一张都和中心足够像，不会像并查集那样 A 像 B、B 像 C 就把不像的 A 和 C 连进同一组。
- * 返回下标数组，中心在第一个。
- */
-export function groupSimilar(ids: string[], pairs: [number, number, number][], max = SIMILAR_GROUP_MAX): number[][] {
-	const adj: [number, number][][] = ids.map(() => []);
-	for (const [i, j, s] of pairs) {
-		adj[i]!.push([j, s]);
-		adj[j]!.push([i, s]);
-	}
-	const order = ids
-		.map((_, i) => i)
-		.filter((i) => adj[i]!.length)
-		.sort((a, b) => adj[b]!.length - adj[a]!.length || (ids[a]! < ids[b]! ? -1 : 1));
-	const taken = new Uint8Array(ids.length);
-	const groups: number[][] = [];
-	for (const c of order) {
-		if (taken[c]) continue;
-		const members = adj[c]!.filter(([j]) => !taken[j]).sort((x, y) => y[1] - x[1] || (ids[x[0]]! < ids[y[0]]! ? -1 : 1));
-		if (!members.length) continue;
-		const g = [c, ...members.slice(0, max - 1).map(([j]) => j)];
-		for (const i of g) taken[i] = 1;
-		groups.push(g);
-	}
-	return groups;
+/** 按 JSON_IDS 个一组展开 id，对每组执行同一条查询（一次 batch）。 */
+async function eachChunk<T>(env: Env, sql: string, ids: string[]): Promise<T[]> {
+	const stmts: D1PreparedStatement[] = [];
+	for (let i = 0; i < ids.length; i += JSON_IDS) stmts.push(env.DB.prepare(sql).bind(JSON.stringify(ids.slice(i, i + JSON_IDS))));
+	if (!stmts.length) return [];
+	return (await env.DB.batch<T>(stmts)).flatMap((r) => r.results);
 }
 
 /** 两张都认出了人物时，至少要有一个相同的人物。 */
@@ -129,84 +200,154 @@ function samePeople(a: Set<string> | undefined, b: Set<string> | undefined): boo
 	return false;
 }
 
-const PAIR_VISIBLE = (t: string) => `${t}.deleted_at IS NULL AND ${t}.status = 'ready' AND ${t}.archived = 0 AND ${t}.kind != 'video'`;
+/**
+ * 从 cursor 开始取最多 SIMILAR_GROUP_PAGE 组（最多看 SIMILAR_CENTER_SCAN_MAX 个中心）。
+ * 一张照片只有在它的相似照片里没有排在它前面的（同一阶段、也能当中心）时才当中心，否则它归到前面那张的组里：
+ * 这样每组只有一个中心，不管它落在哪一页，翻页时不会把上一页的组换个中心再列一遍。
+ * 中心按顺序认领：已经在这一页别的组里的跳过；组员是中心的照片对里能参与整理、人物对得上、这一页还没用过的
+ * （没暂不处理过的组不收暂不处理过的照片），按相似度从高到低，最多 SIMILAR_GROUP_MAX 张。
+ * 一张能参与整理的组员都没有的中心不会再成组：similar_n 清零（暂不处理过的同时删掉记录），以后不再读它；
+ * 只是因为人物对不上的记成 -1，人物有变化时重新计数（reviveParked）。
+ */
+export async function similarQueue(env: Env, cursor: string | undefined) {
+	await reviveParked(env);
+	let cur = decodeCursor(cursor);
+	const groups: { ids: string[]; snoozed: boolean }[] = [];
+	const taken = new Set<string>();
+	const dead: string[] = [];
+	const parked: string[] = [];
+	let examined = 0;
+	let exhausted = false;
+	scan: while (groups.length < SIMILAR_GROUP_PAGE && examined < SIMILAR_CENTER_SCAN_MAX) {
+		const centers = await nextCenters(env, cur, CENTER_BATCH);
+		if (!centers.length) {
+			if (cur.phase === 1) {
+				cur = { phase: 2, at: -1, id: "" };
+				continue;
+			}
+			exhausted = true;
+			break;
+		}
+		examined += centers.length;
+		const centerIds = centers.map((c) => c.id);
+		const pairs = await eachChunk<{ c: string; o: string; score: number }>(
+			env,
+			`SELECT p.a AS c, p.b AS o, p.score FROM json_each(?) j CROSS JOIN similar_pairs p ON p.a = j.value
+			 UNION ALL
+			 SELECT p.b AS c, p.a AS o, p.score FROM json_each(?1) j CROSS JOIN similar_pairs p INDEXED BY similar_pairs_b ON p.b = j.value`,
+			centerIds,
+		);
+		const neighbors = new Map<string, { id: string; score: number }[]>();
+		for (const p of pairs) {
+			const list = neighbors.get(p.c);
+			if (list) list.push({ id: p.o, score: p.score });
+			else neighbors.set(p.c, [{ id: p.o, score: p.score }]);
+		}
+		const involved = [...new Set([...centerIds, ...pairs.map((p) => p.o)])];
+		const [eligible, faces] = await Promise.all([
+			eachChunk<{ id: string; n: number | null; at: number | null }>(
+				env,
+				`SELECT x.id, f.similar_n AS n, s.snoozed_at AS at FROM json_each(?) j CROSS JOIN assets x ON x.id = j.value
+				 LEFT JOIN asset_fp f ON f.asset_id = x.id LEFT JOIN similar_snoozes s ON s.asset_id = x.id
+				 WHERE ${ELIGIBLE("x")}`,
+				involved,
+			),
+			eachChunk<{ asset_id: string; person_id: string }>(
+				env,
+				"SELECT f.asset_id, f.person_id FROM json_each(?) j CROSS JOIN faces f INDEXED BY faces_asset ON f.asset_id = j.value WHERE f.person_id IS NOT NULL",
+				involved,
+			),
+		]);
+		const ok = new Map(eligible.map((r) => [r.id, r]));
+		/** m 在队列里排在中心 c 前面，而且自己也能当中心。 */
+		const ahead = (c: Cursor, m: { id: string; n: number | null; at: number | null }) =>
+			c.phase === 1
+				? m.at === null && (m.n ?? 0) > 0 && ((m.n ?? 0) > c.n || (m.n === c.n && m.id < c.id))
+				: m.at !== null && (m.at < c.at || (m.at === c.at && m.id < c.id));
+		const people = new Map<string, Set<string>>();
+		for (const f of faces) {
+			const s = people.get(f.asset_id);
+			if (s) s.add(f.person_id);
+			else people.set(f.asset_id, new Set([f.person_id]));
+		}
+		for (const c of centers) {
+			cur = c.at;
+			if (taken.has(c.id)) continue;
+			const visible = (neighbors.get(c.id) ?? []).filter((n) => ok.has(n.id));
+			const candidates = visible.filter((n) => samePeople(people.get(c.id), people.get(n.id)));
+			if (!candidates.length) {
+				(visible.length ? parked : dead).push(c.id);
+				continue;
+			}
+			if (candidates.some((n) => ahead(c.at, ok.get(n.id)!))) continue;
+			const members = candidates
+				.filter((n) => !taken.has(n.id) && (cur.phase === 2 || ok.get(n.id)!.at === null))
+				.sort((x, y) => y.score - x.score || (x.id < y.id ? -1 : 1))
+				.slice(0, SIMILAR_GROUP_MAX - 1);
+			if (!members.length) continue;
+			const ids = [c.id, ...members.map((n) => n.id)];
+			for (const id of ids) taken.add(id);
+			groups.push({ ids, snoozed: cur.phase === 2 });
+			if (groups.length >= SIMILAR_GROUP_PAGE) break scan;
+		}
+	}
+	if (dead.length || parked.length) {
+		await env.DB.batch([
+			env.DB.prepare("UPDATE asset_fp SET similar_n = 0 WHERE asset_id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(dead)),
+			env.DB.prepare("UPDATE asset_fp SET similar_n = -1 WHERE asset_id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(parked)),
+			env.DB.prepare("DELETE FROM similar_snoozes WHERE asset_id IN (SELECT value FROM json_each(?))").bind(JSON.stringify([...dead, ...parked])),
+		]);
+	}
+	return { groups, next: exhausted ? null : encodeCursor(cur) };
+}
 
 /**
- * GET /api/similar-groups?offset=：每页 GROUP_PAGE 组。没处理过的组在前（照片多的在前），“暂不处理”过的排在后面
- * （按时间从早到晚，所以一直点“暂不处理”会轮流看到每一组）。读取量和照片对的数量成正比（最多 SIMILAR_PAIR_MAX 对）
- * + 有人物的脸 + 暂不处理的记录；推荐保留要用的列只给当前页的照片查。只由用户打开页面和操作之后的刷新触发。
+ * GET /api/similar-groups?cursor=：待整理队列的一页（见 similarQueue）。推荐保留的在每组最前面，其余按分辨率从高到低。
+ * next 是下一页的位置，null 表示到底了。只由用户打开页面、加载更多和操作之后的刷新触发。
  */
 similarGroups.get("/similar-groups", async (c) => {
-	const offset = Math.max(0, Math.floor(Number(c.req.query("offset") ?? 0)) || 0);
-	const [pairRes, faceRes, snoozeRes, fpRes] = await c.env.DB.batch<unknown>([
-		c.env.DB.prepare(
-			`SELECT p.a, p.b, p.score FROM similar_pairs p CROSS JOIN assets x ON x.id = p.a CROSS JOIN assets y ON y.id = p.b
-			 WHERE ${PAIR_VISIBLE("x")} AND ${PAIR_VISIBLE("y")} LIMIT ?`,
-		).bind(SIMILAR_PAIR_MAX),
-		c.env.DB.prepare("SELECT asset_id, person_id FROM faces INDEXED BY faces_person WHERE person_id IS NOT NULL"),
-		c.env.DB.prepare("SELECT asset_id, snoozed_at FROM similar_snoozes"),
-		c.env.DB.prepare("SELECT COUNT(*) AS n FROM asset_fp"),
-	]);
-	const pairRows = pairRes!.results as { a: string; b: string; score: number }[];
-	const people = new Map<string, Set<string>>();
-	for (const r of faceRes!.results as { asset_id: string; person_id: string }[]) {
-		const s = people.get(r.asset_id);
-		if (s) s.add(r.person_id);
-		else people.set(r.asset_id, new Set([r.person_id]));
-	}
-	const snoozed = new Map((snoozeRes!.results as { asset_id: string; snoozed_at: number }[]).map((r) => [r.asset_id, r.snoozed_at]));
-
-	const ids: string[] = [];
-	const index = new Map<string, number>();
-	const at = (id: string) => {
-		let i = index.get(id);
-		if (i === undefined) {
-			i = ids.push(id) - 1;
-			index.set(id, i);
-		}
-		return i;
-	};
-	const pairs: [number, number, number][] = [];
-	for (const r of pairRows) if (samePeople(people.get(r.a), people.get(r.b))) pairs.push([at(r.a), at(r.b), r.score]);
-
-	const groups = groupSimilar(ids, pairs)
-		.map((g) => ({ ids: g.map((i) => ids[i]!), snoozedAt: Math.max(0, ...g.map((i) => snoozed.get(ids[i]!) ?? 0)) }))
-		.sort((x, y) => x.snoozedAt - y.snoozedAt || y.ids.length - x.ids.length || (x.ids[0]! < y.ids[0]! ? -1 : 1));
-	const pageGroups = groups.slice(offset, offset + GROUP_PAGE);
-	const items = await selectByIds<KeeperRow>(c.env, KEEPER_COLUMNS, pageGroups.flatMap((g) => g.ids));
+	const { groups, next } = await similarQueue(c.env, c.req.query("cursor"));
+	const items = await selectByIds<KeeperRow>(c.env, KEEPER_COLUMNS, groups.flatMap((g) => g.ids));
 	const pixels = (r: KeeperRow) => (r.width ?? 0) * (r.height ?? 0);
 	return c.json({
-		groups: pageGroups.flatMap((g) => {
+		groups: groups.flatMap((g) => {
 			const present = g.ids.map((id) => items.get(id)).filter((r): r is KeeperRow => !!r);
 			if (present.length < 2) return [];
 			const keep = pickKeeper(present);
-			// 推荐保留的在最前面，其余按分辨率从高到低
 			const sorted = [keep, ...present.filter((r) => r !== keep).sort((x, y) => pixels(y) - pixels(x) || (x.id < y.id ? -1 : 1))];
-			return [{ keep: keep.id, items: sorted.map(toItem), snoozed: g.snoozedAt > 0 }];
+			return [{ keep: keep.id, items: sorted.map(toItem), snoozed: g.snoozed }];
 		}),
-		total: groups.length,
-		next: offset + GROUP_PAGE < groups.length ? offset + GROUP_PAGE : null,
-		fingerprints: (fpRes!.results[0] as { n: number }).n,
-		pending: await pendingCount(c.env),
-		truncated: pairRows.length >= SIMILAR_PAIR_MAX,
+		next,
+		pending: await similarPending(c.env),
 		...(vectorIndex(c.env) ? {} : { unavailable: true }),
 	});
 });
 
 /** POST /api/similar-groups/scan：页面分批补查（每次 SIMILAR_SCAN_BATCH 张），前端在有剩余时继续请求，次数有上限。 */
-similarGroups.post("/similar-groups/scan", async (c) => {
-	const scanned = await scanSimilar(c.env, SIMILAR_SCAN_BATCH);
-	return c.json({ scanned, pending: await pendingCount(c.env) });
+similarGroups.post("/similar-groups/scan", async (c) => c.json({ scanned: await scanSimilar(c.env, SIMILAR_SCAN_BATCH) }));
+
+const Ids = z.object({ ids: z.array(ID).min(1).max(SIMILAR_SNOOZE_MAX) });
+
+/** POST /api/similar-groups/snooze { ids }：暂不处理，这些照片排到队列末尾（不再当没处理过的组的中心）。 */
+similarGroups.post("/similar-groups/snooze", async (c) => {
+	const { ids } = Ids.parse(await c.req.json());
+	const json = JSON.stringify(ids);
+	const [res] = await c.env.DB.batch<{ asset_id: string }>([
+		c.env.DB.prepare(
+			`INSERT OR REPLACE INTO similar_snoozes (asset_id, snoozed_at)
+			 SELECT x.id, ? FROM json_each(?) j JOIN assets x ON x.id = j.value RETURNING asset_id`,
+		).bind(Date.now(), json),
+		c.env.DB.prepare("UPDATE asset_fp SET similar_n = 0 WHERE asset_id IN (SELECT value FROM json_each(?))").bind(json),
+	]);
+	return c.json({ snoozed: res!.results.length });
 });
 
-/** POST /api/similar-groups/snooze { ids }：暂不处理，这些照片所在的组排到队列末尾。 */
-similarGroups.post("/similar-groups/snooze", async (c) => {
-	const { ids } = z.object({ ids: z.array(ID).min(1).max(SIMILAR_SNOOZE_MAX) }).parse(await c.req.json());
-	const { results } = await c.env.DB.prepare(
-		`INSERT OR REPLACE INTO similar_snoozes (asset_id, snoozed_at)
-		 SELECT x.id, ? FROM json_each(?) j JOIN assets x ON x.id = j.value RETURNING asset_id`,
-	)
-		.bind(Date.now(), JSON.stringify(ids))
-		.all();
-	return c.json({ snoozed: results.length });
+/**
+ * POST /api/similar-groups/recount { ids }：一组照片被移到回收站 / 归档（或撤销）之后，按实际的照片对重算它们的相似照片数，
+ * 进了回收站、归档的不再当中心，撤销后恢复。
+ */
+similarGroups.post("/similar-groups/recount", async (c) => {
+	const { ids } = Ids.parse(await c.req.json());
+	await recountStatement(c.env, ids).run();
+	return c.json({ ok: true });
 });

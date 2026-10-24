@@ -641,8 +641,8 @@ export const en: Messages = {
 		dialog: "Compare similar photos",
 		intro:
 			"Photos that look alike: different versions of the same picture (resized, cropped, watermarked, screenshots) or shots from the same moment with a slightly different pose or expression. Only the picture itself counts, not when it was taken; when people are recognized in both, they must share at least one person. The one to keep is picked by favorite, RAW, resolution, then file size. Not sure? Choose “Later” and the group moves to the end of the queue to come back around.",
-		summary: (groups: number, photos: number, truncated: boolean) =>
-			`${count(groups, "group", "groups")}, compared ${count(photos, "fingerprinted photo", "fingerprinted photos")}${truncated ? " (too many look-alikes, only some were grouped)" : ""}.`,
+		listed: (groups: number, more: boolean) => `Showing ${count(groups, "group", "groups")}${more ? ", more below" : ""}.`,
+		loadMore: "Load more",
 		scanning: (n: number) => `Comparing, ${fmtNumber(n)} left…`,
 		waiting: (n: number) => `${count(n, "newly processed photo hasn't", "newly processed photos haven't")} been compared yet; this happens automatically soon.`,
 		unavailable: "The similarity index is unavailable, so new photos won't be compared.",
