@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+	COMPRESS_JPEG_QUALITY,
+	COMPRESS_MAX_BYTES,
+	COMPRESS_MAX_DIFF,
+	COMPRESS_MIN_SAVING,
 	CONSUMER_BUDGET_MS,
 	DEVICE_CLAIM_MAX,
 	DEVICE_OUTPUT_MAX_BYTES,
@@ -15,6 +19,7 @@ import {
 	type CropBox,
 	type JobKind,
 } from "@nana/shared";
+import { compressedKey, compressible } from "./compress";
 import { DERIVED_FILES, derivedKey } from "./derived";
 import { guardStub } from "./guard";
 import { CLAIMABLE_SQL, requeueAfterDevice, settleJob, type JobRow } from "./jobs";
@@ -47,7 +52,12 @@ type AppEnv = { Bindings: Env };
 /** 单次 PUT 的上限（Cloudflare 请求体上限 100 MB），更大的走分块上传。 */
 const SINGLE_PUT_MAX = 4 * UPLOAD_PART_BYTES;
 
-type OutputName = keyof typeof DERIVED_FILES;
+/**
+ * 设备能上传的文件：派生文件，加上原图压缩的结果 compressed（一个新的 o/ key，见 compress.ts 的 compressedKey；
+ * 只有 compress 任务的 handler 核对过之后才会换上去，没换上就删掉）。
+ */
+const OUTPUT_FILES = { ...DERIVED_FILES, compressed: { ext: "jpg", mime: "image/jpeg" } } as const;
+type OutputName = keyof typeof OUTPUT_FILES;
 type DeriveMode = "full" | "skip";
 
 export interface DeviceInputFile {
@@ -89,6 +99,8 @@ export interface DevicePlan {
 	meta: string[];
 	/** 普通视频：设备按自己读到的时长决定是否转码（不超过 maxDurationMs） */
 	transcode: { fileId: string; maxDurationMs: number } | null;
+	/** 原图压缩：参数和容器路径一样（shared 的 COMPRESS_*），压缩了就上传到 outputs.compressed。旧版设备端没有这一项（任务会失败，更新设备端即可） */
+	compress: { fileId: string; quality: number; minSaving: number; maxBytes: number; maxDiff: number } | null;
 	/** 要上传的派生文件：名字 → R2 key */
 	outputs: Partial<Record<OutputName, string>>;
 	info: DeviceJobInfo;
@@ -131,6 +143,7 @@ export async function planJob(env: Env, job: Pick<JobRow, "id" | "asset_id" | "k
 		derive: null,
 		meta: [],
 		transcode: null,
+		compress: null,
 		outputs: {},
 		info: { name: null, assetKind: null },
 	};
@@ -168,9 +181,22 @@ export async function planJob(env: Env, job: Pick<JobRow, "id" | "asset_id" | "k
 		}
 	} else if (job.kind === "rotate") {
 		if (asset.kind !== "video") derive(imageKind, "skip");
+	} else if (job.kind === "compress") {
+		// 和 compressAsset 同一个判断；不能压缩时计划为空，complete 时 handler 直接返回
+		const original = await compressible(env, asset.id);
+		if (original) {
+			plan.compress = {
+				fileId: original.file_id,
+				quality: COMPRESS_JPEG_QUALITY,
+				minSaving: COMPRESS_MIN_SAVING,
+				maxBytes: COMPRESS_MAX_BYTES,
+				maxDiff: COMPRESS_MAX_DIFF,
+			};
+			plan.outputs.compressed = compressedKey(job);
+		}
 	}
 
-	const used = new Set([plan.derive?.fileId, ...plan.meta, plan.transcode?.fileId].filter(Boolean));
+	const used = new Set([plan.derive?.fileId, ...plan.meta, plan.transcode?.fileId, plan.compress?.fileId].filter(Boolean));
 	plan.inputs = files
 		.filter((f) => used.has(f.id))
 		.map((f) => ({
@@ -220,11 +246,19 @@ const DeriveResult = z.object({
 	mask: z.string().max(16_000).nullable().default(null),
 });
 const MetaResult = z.object({ meta: Meta, sha256: Sha, size: z.number().int().nonnegative(), crc32: z.number().int().nonnegative() });
+const CompressResult = z.object({
+	sha256: Sha,
+	size: z.number().int().nonnegative(),
+	skipped: z.string().max(64).nullable(),
+	out: z.object({ sha256: Sha, size: z.number().int().positive(), crc32: z.number().int().nonnegative() }).nullable(),
+});
 export const DeviceResults = z.object({
 	derive: DeriveResult.nullable().default(null),
 	meta: z.record(z.string().max(64), MetaResult).default({}),
 	/** 设备转码了：输出已经上传到 outputs.video_preview */
 	transcoded: z.boolean().default(false),
+	/** 原图压缩的结果；压缩了（out 不为 null）时文件已经上传到 outputs.compressed */
+	compress: CompressResult.nullable().default(null),
 });
 export type DeviceResults = z.infer<typeof DeviceResults>;
 
@@ -279,6 +313,25 @@ export function precomputedProcessor(env: Env, plan: DevicePlan, results: Device
 			const r = fileId ? results.meta[fileId] : undefined;
 			return r ? done(r) : fail("meta unexpected call or missing result");
 		},
+		async compress(inputKey: string, outputKey: string) {
+			const p = plan.compress;
+			if (!p || keys.get(p.fileId) !== inputKey || plan.outputs.compressed !== outputKey) return fail("compress unexpected call");
+			const r = results.compress;
+			if (!r) return fail("compress missing result (update the device)");
+			if (r.out) {
+				// 设备说的字节确实在 R2 上：大小一样、sha256 一样（Worker 自己算，和 /input/:fileId/sha256 一样）
+				const object = await env.PHOTOS.get(outputKey);
+				if (!object || object.size !== r.out.size) {
+					await object?.body.cancel();
+					return fail("compressed file was not uploaded");
+				}
+				const digest = new crypto.DigestStream("SHA-256");
+				await object.body.pipeTo(digest);
+				const sha256 = [...new Uint8Array(await digest.digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+				if (sha256 !== r.out.sha256) return fail("compressed file checksum mismatch");
+			}
+			return done(r);
+		},
 		async transcode(inputKey: string, outputKey: string) {
 			const t = plan.transcode;
 			if (!t || keys.get(t.fileId) !== inputKey || plan.outputs.video_preview !== outputKey) return fail("transcode unexpected call");
@@ -309,7 +362,7 @@ const claimLost = { error: "claim lost" } as const;
 
 /** 计划里这个名字的输出 key（必须和设备拿到的一致：期间被旋转过，版本号变了，旧结果不能写到新 key 上）。 */
 async function outputKey(env: Env, job: JobRow, name: string, expected: string | undefined): Promise<string | null> {
-	if (!Object.hasOwn(DERIVED_FILES, name)) return null;
+	if (!Object.hasOwn(OUTPUT_FILES, name)) return null;
 	const key = (await planJob(env, job)).outputs[name as OutputName];
 	return key && key === expected ? key : null;
 }
@@ -431,7 +484,7 @@ export const device = new Hono<AppEnv>()
 		const fixed = new FixedLengthStream(length);
 		const [, written] = await Promise.all([
 			body.pipeTo(fixed.writable),
-			env.PHOTOS.put(key, fixed.readable, { httpMetadata: { contentType: DERIVED_FILES[name as OutputName].mime } }),
+			env.PHOTOS.put(key, fixed.readable, { httpMetadata: { contentType: OUTPUT_FILES[name as OutputName].mime } }),
 		]);
 		return c.json({ size: written.size });
 	})
@@ -443,7 +496,7 @@ export const device = new Hono<AppEnv>()
 		const key = await outputKey(env, job, name, c.req.query("key"));
 		if (!key) return c.json({ error: "output not in plan" }, 409);
 		const { size } = z.object({ size: z.number().int().positive().max(DEVICE_OUTPUT_MAX_BYTES) }).parse(await c.req.json());
-		const mpu = await env.PHOTOS.createMultipartUpload(key, { httpMetadata: { contentType: DERIVED_FILES[name as OutputName].mime } });
+		const mpu = await env.PHOTOS.createMultipartUpload(key, { httpMetadata: { contentType: OUTPUT_FILES[name as OutputName].mime } });
 		return c.json({ uploadId: mpu.uploadId, partBytes: UPLOAD_PART_BYTES, parts: Math.ceil(size / UPLOAD_PART_BYTES) });
 	})
 	.put("/jobs/:id/out/:name/mpu/:uploadId/:n", async (c) => {
@@ -532,6 +585,12 @@ export async function completeDeviceJob(env: Env, job: JobRow, results: DeviceRe
 	if (mp4 && results.transcoded && !state.transcodeUsed) {
 		const used = await env.DB.prepare("SELECT 1 FROM asset_files WHERE r2_key = ?").bind(mp4).first();
 		if (!used) await env.PHOTOS.delete(mp4);
+	}
+	// 压缩的结果同理：handler 没换上去（条目已经不能压缩、核对失败）就删掉
+	const compressed = plan.outputs.compressed;
+	if (compressed && results.compress?.out) {
+		const used = await env.DB.prepare("SELECT 1 FROM asset_files WHERE r2_key = ?").bind(compressed).first();
+		if (!used) await env.PHOTOS.delete(compressed);
 	}
 	const status = await settleJob(env, job.id, job.attempts, error);
 	console.log(JSON.stringify({ event: "device_job", jobId: job.id, kind: job.kind, status }));

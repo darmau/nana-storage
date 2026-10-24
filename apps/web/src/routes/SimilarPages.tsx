@@ -13,6 +13,7 @@ import { DuplicateGroupsSkeleton } from "../ui/Skeleton";
 import { IconDuplicate, IconInfo, IconTrash } from "../ui/icons";
 import type { AssetDetail } from "../viewer/types";
 import { DuplicateCompare, comparePill } from "./DuplicateCompare";
+import { OrganizeTitle } from "./OrganizePages";
 import { useDocumentTitle } from "../ui/title";
 
 
@@ -158,7 +159,7 @@ export function DuplicatesPage() {
 		<>
 			<div className="space-y-5">
 				<div className="flex flex-wrap items-center gap-2 pt-1">
-					<h1 className="page-title flex-1">{t.duplicates.title}</h1>
+					<OrganizeTitle title={t.duplicates.title} className="flex-1" />
 					{data && data.groups.length > 0 && (
 						<button className="btn btn-danger" disabled={busy} onClick={() => void trashGroups(data.groups)}>
 							<IconTrash size={18} />

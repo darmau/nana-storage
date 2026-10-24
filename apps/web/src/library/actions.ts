@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { COMPRESS_BATCH_MAX } from "@nana/shared";
 import { api } from "../api";
 
 export type BatchAction =
@@ -14,7 +15,7 @@ export type BatchAction =
 
 /** 资料库里任何数据变了以后，刷新所有相关列表。 */
 export function invalidateLibrary(qc: QueryClient) {
-	for (const key of ["timeline", "list", "asset", "folders", "albums", "smart-sets", "similar", "duplicates", "similar-groups", "people", "storage-summary"])
+	for (const key of ["timeline", "list", "asset", "folders", "albums", "smart-sets", "similar", "duplicates", "similar-groups", "compress", "people", "storage-summary"])
 		void qc.invalidateQueries({ queryKey: [key] });
 }
 
@@ -22,6 +23,22 @@ export async function batch(qc: QueryClient, ids: string[], action: BatchAction)
 	const res = await api<{ changed: number }>("/assets/batch", { method: "POST", json: { ids, ...action } });
 	invalidateLibrary(qc);
 	return res;
+}
+
+/** 原图压缩：给选中的照片建任务（服务端每次最多 COMPRESS_BATCH_MAX 张，按批发），返回排上队和跳过的张数。 */
+export async function compressOriginals(qc: QueryClient, ids: string[]) {
+	let queued = 0;
+	let skipped = 0;
+	for (let i = 0; i < ids.length; i += COMPRESS_BATCH_MAX) {
+		const r = await api<{ queued: number; skipped: number }>("/compress", { method: "POST", json: { ids: ids.slice(i, i + COMPRESS_BATCH_MAX) } });
+		queued += r.queued;
+		skipped += r.skipped;
+	}
+	// 页头的数字和候选列表（列表的 key 是 ["list", "compress", …]，见 listQuery）
+	void qc.invalidateQueries({ queryKey: ["compress"] });
+	void qc.invalidateQueries({ queryKey: ["list", "compress"] });
+	void qc.invalidateQueries({ queryKey: ["jobs"] });
+	return { queued, skipped };
 }
 
 export async function addToAlbum(qc: QueryClient, albumId: string, ids: string[]) {

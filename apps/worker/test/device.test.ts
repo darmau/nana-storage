@@ -291,4 +291,31 @@ describe("device jobs", () => {
 		expect(plan).toMatchObject({ derive: null, inputs: [] });
 		expect((await call("POST", `/device/jobs/${plan.jobId}/complete`, { t: plan.token, results: {} })).json.status).toBe("done");
 	});
+
+	it("compresses originals on the device and checks the uploaded bytes", async () => {
+		const small = new Uint8Array([7, 7, 7]);
+		const smallSha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", small))].map((b) => b.toString(16).padStart(2, "0")).join("");
+		const compressResult = (input: string, sha256: string) => ({ compress: { sha256: input, size: ORIGINAL.byteLength, skipped: null, out: { sha256, size: small.byteLength, crc32: 5 } } });
+		await seed("C1", { job: "compress", status: "ready" });
+		await seed("C2", { job: "compress", status: "ready", sha: "c".repeat(64) });
+		const plans = (await call("POST", "/device/claim", { name: "mac", max: 2 })).json.jobs;
+		expect(plans[0]).toMatchObject({ derive: null, compress: { fileId: "f-C1", quality: 90 }, inputs: [{ fileId: "f-C1" }] });
+		const key = plans[0].outputs.compressed;
+		expect(key).toBe("o/C1/c-J-C1-1");
+		for (const plan of plans) {
+			const r = await put(`/device/jobs/${plan.jobId}/out/compressed?t=${plan.token}&key=${encodeURIComponent(plan.outputs.compressed)}`, small);
+			expect(r.status).toBe(200);
+		}
+		// 设备报的 sha256 和上传的字节对不上：不换，删掉上传的文件，任务退回
+		const bad = await call("POST", `/device/jobs/${plans[1].jobId}/complete`, { t: plans[1].token, results: compressResult("c".repeat(64), "b".repeat(64)) });
+		expect(bad.json.status).toBe("retry");
+		expect(await env.PHOTOS.head(plans[1].outputs.compressed)).toBeNull();
+		expect(await env.DB.prepare("SELECT r2_key FROM asset_files WHERE id = 'f-C2'").first("r2_key")).toBe("o/C2/f");
+
+		const ok = await call("POST", `/device/jobs/${plans[0].jobId}/complete`, { t: plans[0].token, results: compressResult(SHA, smallSha) });
+		expect(ok.json.status).toBe("done");
+		const f = await env.DB.prepare("SELECT r2_key, size, sha256, compress_state, source_sha256 FROM asset_files WHERE id = 'f-C1'").first();
+		expect(f).toEqual({ r2_key: key, size: 3, sha256: smallSha, compress_state: 1, source_sha256: SHA });
+		expect(await env.PHOTOS.head("o/C1/f")).toBeNull();
+	});
 });

@@ -31,13 +31,14 @@
 - **不使用 `@cloudflare/containers` 的 `Container` 类。** 它在容器运行期间会不断自我续期 alarm。改用原生的 `ctx.container`，再配合 `setInactivityTimeout`。
 - **不使用 R2 事件通知。** 派生文件写回同一个桶会再次触发处理。
 - **Worker 不请求自己的域名**，DO 之间不互相调用。
-- **只有 `jobs.ts` 里的 `createJob` / `enqueueJob` / `requeuePending` / `retryFailed` 可以往队列里投递消息。** `requeuePending` 的自动调用只有设备端交还云端后的补发（`requeueAfterDevice`），其余都是用户点击。 队列消费者从不自己投递。`createJob` 入队失败时删掉刚插入的任务再抛错；上传完成（`complete`）用 `jobInsert()` 把“条目改成 pending”和“建任务”放进同一个 batch，再 `enqueueJob`，入队失败只记日志（任务留在 D1，“重新排队”可以补发）。创建上传时条目和上传记录也在同一个 batch 里写，不会留下空条目。D1 的 `jobs` 表是唯一的真实状态，每个任务最多尝试 `MAX_JOB_ATTEMPTS` 次。
+- **只有 `jobs.ts` 里的 `createJob` / `createJobs`（原图压缩的批量操作）/ `enqueueJob` / `requeuePending` / `retryFailed` 可以往队列里投递消息。** `requeuePending` 的自动调用只有设备端交还云端后的补发（`requeueAfterDevice`），其余都是用户点击。 队列消费者从不自己投递。`createJob` 入队失败时删掉刚插入的任务再抛错；上传完成（`complete`）用 `jobInsert()` 把“条目改成 pending”和“建任务”放进同一个 batch，再 `enqueueJob`，入队失败只记日志（任务留在 D1，“重新排队”可以补发）。创建上传时条目和上传记录也在同一个 batch 里写，不会留下空条目。D1 的 `jobs` 表是唯一的真实状态，每个任务最多尝试 `MAX_JOB_ATTEMPTS` 次。
 - **只能通过 `processorStub(env, slot)` 获取 Processor**，`slot` 必须来自 `UsageGuard.acquireSlot()`，用完 `releaseSlot()`。池里固定只有 `PROCESSOR_POOL_SIZE`（32）个名字，Processor 也会拒绝在池外启动容器。同时运行几个容器由 `DEFAULT_PROCESSORS` 决定（4 个），设置页可以临时调高（`setProcessorsOverride()`，最长 7 天，到期自动回落，也可以提前结束：`clearProcessorsOverride()`）。队列 `max_concurrency` 等于 `PROCESSOR_POOL_SIZE`，多出来的消费者在 UsageGuard 里等槽位（最多 `SLOT_WAIT_MS`，不轮询），等不到就延迟重投，不算任务的尝试次数。延迟重投会消耗队列的 `max_retries`，所以它是 100（平台上限，`check:cost-rules` 只允许 ≤ 100）：太小的话，积压几千个任务时消息等槽位就耗光次数、进死信队列，任务永远停在 pending。重投不启动容器，同时最多 32 个消费者在等，每天最多约 7700 次。消息到达时任务正在运行（还没超过 `JOB_STALE_MS`）不 ack，而是延迟 `JOB_STALE_MS` 再看（`recheck`）：消费者中途被杀掉（部署、超时）后的重投靠它在过期后重新认领，否则任务永远停在 running。
 - 容器：`enableInternet: false`，不允许 keepAlive，每个任务都有硬超时，超时就 `destroy()`。空闲 `CONTAINER_INACTIVITY_MS`（30 秒）后由运行时停止；任务结束时如果没有 pending 任务、`UPLOAD_ACTIVE_MS` 内也没有新建上传，消费者在归还槽位之前直接停掉容器（`stopIfIdle`）。队列消费者单次最多 15 分钟，转码超时不会超过任务剩下的时间（`RunningJob.deadline`），不够就跳过转码。
 - 启动容器之前必须先 `UsageGuard.reserveJob()`，结束后调用 `recordContainer()` 记录实际时长。
 - UsageGuard 只防失控，不限制正常用量：每天的容器时长 / 任务数 / 上传量只记账和显示。熔断条件只有两个：本月（UTC 自然月）容器的估算超额费用（`containerCost()`，扣掉免费额度、CPU 按满载算）达到月度上限（默认 `DEFAULT_MONTHLY_BUDGET_USD` = $10，设置页可改，范围 `MIN/MAX_MONTHLY_BUDGET_USD`，存在 UsageGuard 里不过期）；同一条目一小时内自动重试（任务的第 2 次及以后的尝试）超过 `MAX_RETRIES_PER_ASSET_PER_HOUR`（6）次，或者全部运行（包括旋转、加载原图、手动重试这些用户操作新建的任务）超过 `MAX_PROCESS_PER_ASSET_PER_HOUR`（30）次。Workers / DO / D1 / R2 按次计费的部分不熔断，由 `wrangler.jsonc` 的速率上限封顶；没有账户级的看门狗（要额外的 API 令牌，部署太复杂），改为上传面板估算这一批的容器费用（`upload/estimate.ts`：本月平均每个任务的容器时间 × 张数，任务太少时用默认值，费用是 `containerCost()` 的增量），会超过月度上限或超过 $1 时建议设备端处理；只读一次 `GET /api/guard`，不轮询。超过月度上限时 `POST /api/guard/resume` 返回 409，必须先调高上限。因为同一条目反复处理而熔断时，UsageGuard 记下条目 id（`trippedAssetId`），成本防护页列出它的全部任务（`GET /api/jobs/asset/:id`，最多 50 个，`settings/AssetJobs.tsx`），可以停止排队中 / 卡住的任务（`POST /api/jobs/cancel { ids }` → `cancelJobs`，记成 failed、`last_error = cancelled`，熔断时也允许，之后可以照常重试），再恢复。
 - Cron 每次处理的数量都有上限，不会自我触发。
 - 设备端处理：设备租约（`DEVICE_LEASE_MS`，2 分钟，记在 UsageGuard，没有定时器）有效时，消费者用 `UsageGuard.gate()` 得知后直接 ack，不占槽位、不启动容器，任务留在 D1 等设备认领；设备每次认领续租，空闲时每 `DEVICE_POLL_MS`（10 秒）一次，一直开着每天约 8640 次请求。设备交还云端时补发一批，设备突然消失时由每小时 Cron 补发（每次 `RESUME_BATCH`）。设备的任务同样走 `reserveJob()`（循环熔断）和 `MAX_JOB_ATTEMPTS`，熔断时不能接管；设备的处理时长不记入容器费用。
+- compress 任务（原图压缩，`src/compress.ts`）只有 1 次容器调用（`/tasks/compress`），只由用户在“原图压缩”页点击触发，每次请求最多 `COMPRESS_BATCH_MAX` 张，每张最多压缩一次；不能压缩、不值得压缩的记成 `compress_state = 2` 不再列出。
 - 一个 process 任务最多调用容器：1 次 derive（指纹和人脸都在里面）+ 每个附件 1 次 meta + 最多 1 次 transcode（只有普通视频转码，Live Photo 的动态部分不转，浏览器不能解码 HEVC 时只显示静态照片）；它不创建新任务。rotate 任务（编辑：旋转 / 裁切 / 打码，“加载原图”）只有 1 次 derive。转码失败不会让任务失败（避免重试浪费），超过 `MAX_TRANSCODE_DURATION_MS` 的视频不转码。
 - 重试也不会成功的错误（比如完整性校验失败）抛 `permanent: true`，直接失败。
 - 前端：不允许 `refetchInterval`；重试和轮询都必须有次数或时间上限。
@@ -68,6 +69,15 @@
 - 性能：`onnxruntime-node` 的 `run()` 在调用线程上同步执行，所以设备端把推理放进 worker 线程池（`apps/device/inference.mjs`，按 CPU 数 1–4 个 worker，经 `lib.mjs` 的 `setSessionFactory()` 接入；容器仍在本线程、1 个推理线程）。exiftool 是常驻进程（`lib.mjs` 的 `ExifTool`，`-stay_open`，容器 1 个，设备端 `setExiftoolProcs()`），读不了的文件按 JSON 里的 `Error` 判失败，和单独启动时的退出码一致。推理进行中不能 terminate worker（onnxruntime 会中止整个进程）。
 - 架构：Cloudflare 的镜像是 linux/amd64，Apple Silicon 上的设备端是 arm64，onnxruntime 的 int8 计算略有差别：phash 完全一致，CLIP 余弦约 0.99（高于所有阈值，混用没有问题）。
 - 本地开发：站点地址填 `http://host.docker.internal:8787`（http 只允许本地主机名，不需要登录）。
+
+## 整理与原图压缩
+
+- 整理（`routes/OrganizePages.tsx`）：重复照片、相似照片、原图压缩。桌面端是侧边栏的“整理”（`/organize`，列出三个入口；进入其中任何一页时它都算选中），移动端没有单独的标签，三个入口平铺在资料库首页（同一份 `ORGANIZE_ITEMS`），这几页在移动端算“资料库”标签。三个子页面的标题带“整理 ›”面包屑（`OrganizeTitle`），在 `motion.ts` 里不是顶层页面（从右推入）。
+- 原图压缩（`/compress`，`src/compress.ts`，容器 `lib.mjs` 的 `compressTask`）：没处理过的 JPEG 原件按大小倒序列出（`GET /api/compress/candidates?min=`，部分索引 `asset_files_compress`，排队中的不列），列表视图，选中后“压缩原图”（`BarContext` 的 `compress`，先 `confirmDialog` 说明不能恢复并估算容器费用）→ `POST /api/compress { ids }` → compress 任务。
+  - 容器：只处理 8 位 Huffman 编码、1 或 3 通道、主图后面没有附加数据（MPF 增益图 / 景深图、动态照片视频）的 JPEG；`vips copy` 按 `COMPRESS_JPEG_QUALITY`（90）重新编码（4:2:0 的保持 4:2:0，其余 4:4:4；渐进的保持渐进），`keep=none` 之后把原图 SOS 之前的 APPn / COM 段逐字节搬回去（不搬 APP14 和 MPF）。省不到 `COMPRESS_MIN_SAVING` 的跳过。校验：完整解码、尺寸和通道一致、关键 EXIF 一致、缩到 1024 后逐像素平均差值 ≤ `COMPRESS_MAX_DIFF`，任何一项不对就抛错（原图不动）。
+  - Worker：压缩后的写到新 key（`compressedKey()`：`o/{assetId}/c-{jobId}-{attempts}`，R2 按 sha256 校验），然后一条 UPDATE 把原件那一行换成新文件（条件是 r2_key / sha256 还是开始时读到的），记下 `source_sha256` / `source_size`、`compress_state = 1`，最后删旧对象。没换上就删新 key。缩略图、预览、指纹、人脸都不重做。
+  - 压缩前的 sha256 留在 `source_sha256`：`uploads.ts` 的去重同时查它，重新上传原始文件仍算重复。process 任务写 CRC32 时按 sha256 定位，不会把旧文件的 CRC 写到压缩后的文件上。
+  - 设备端：计划带 `compress`，设备跑同一个 `compressTask`，把结果上传到 `outputs.compressed`（`OUTPUT_FILES` 比派生文件多这一项），complete 时 Worker 对 R2 上的那份算 sha256 核对后才换。
 
 ## 时间线与查看器
 
@@ -172,8 +182,8 @@
 
 - 颜色、尺寸都是 `apps/web/src/styles.css` 里的 token（`bg-bg`、`bg-card`、`text-muted`、`bg-accent`、`text-accent-fg` …），组件里不直接写色值。`@theme inline` 让 `.theme-dark` 子树（查看器）可以强制深色。
 - 布局尺寸变量：`--header-h`、`--sidebar-w`（md 以上的侧边栏）、`--tabbar-h`（移动端底部标签）。固定定位的东西（地图页、时间线拖动条、多选操作栏）都按这些变量避让。这三个变量已经包含安全区（刘海 / Home 指示条），其他贴边的元素用 `--safe-top/bottom/left/right`，不直接写 `env()`。
-- 导航：搜索框只有一个：桌面在顶栏（`SearchBox`，输入就跳到 `/search?q=`），移动端顶栏没有，放在探索页里（`md:hidden`）。侧边栏的“探索”小标题就是探索页（`/search`）的入口，下面是人物、主题（`/smart-sets`）、地图、统计数据（`/stats`）；移动端底部标签是 照片 / 相册 / 探索 / 文件夹 / 资料库：“探索”在 `/search`、`/people`、`/smart-sets`、`/map`、`/duplicates`、`/similar-groups`、`/stats` 下都高亮（移动端的地图、重复照片、相似照片和统计数据从探索页进入），面包屑“探索 › 主题”；“文件夹”在所有 `/folders/*` 下高亮。资料库首页（`routes/LibraryHome.tsx`）只放别处没有的入口：收藏、回收站和存储空间（文件夹有自己的标签，人物、重复照片在探索页里，不重复放）。
-- 探索页（`routes/SearchPage.tsx`）：没有搜索词和筛选时是入口页：人物、主题卡片（`SmartSetStrip`，不用 `ul li`，见下面的脚本钩子）、地图、重复照片和统计数据、按类型。有搜索词或筛选时显示结果。
+- 导航：搜索框只有一个：桌面在顶栏（`SearchBox`，输入就跳到 `/search?q=`），移动端顶栏没有，放在探索页里（`md:hidden`）。侧边栏的“探索”小标题就是探索页（`/search`）的入口，下面是人物、主题（`/smart-sets`）、地图、统计数据（`/stats`）；移动端底部标签是 照片 / 相册 / 探索 / 文件夹 / 资料库：“探索”在 `/search`、`/people`、`/smart-sets`、`/map`、`/stats` 下都高亮（移动端的地图和统计数据从探索页进入）；“资料库”在收藏、归档、回收站和整理的几页（`/organize`、`/duplicates`、`/similar-groups`、`/compress`）下高亮，面包屑“探索 › 主题”；“文件夹”在所有 `/folders/*` 下高亮。资料库首页（`routes/LibraryHome.tsx`）只放别处没有的入口：收藏、归档、回收站、整理的三项和存储空间（文件夹有自己的标签，人物在探索页里，不重复放）。
+- 探索页（`routes/SearchPage.tsx`）：没有搜索词和筛选时是入口页：人物、主题卡片（`SmartSetStrip`，不用 `ul li`，见下面的脚本钩子）、地图和统计数据、按类型。重复照片、相似照片在“整理”里。有搜索词或筛选时显示结果。
 - 设置（`apps/web/src/routes/settings/`）：`SettingsLayout` 外壳 + 分页（概览 / 后台处理 / 成本防护；使用统计已搬到 `/stats`）。分页之间切换只淡入淡出（`ui/motion.ts`），不从右推入。语言是下拉框。lg 以上左侧是分页导航；窄屏时概览页就是目录，分页标题旁有返回按钮（`SettingsHeader`）。概览只在打开和点“刷新”时请求，不自动刷新。
 - 外观（跟随系统 / 浅色 / 深色）是这台设备的偏好，存在 localStorage（`ui/theme.ts`），由 `<html data-theme>` 生效；`public/theme.js` 在渲染前同步套用（CSP 不允许内联脚本），`dark:` 变体也跟着它走。新增深色相关的样式时，`styles.css` 里两处深色变量都要改。“关于”的版本号由 `vite.config.ts` 注入（`WORKERS_CI_COMMIT_SHA`，本地读 git）。
 - PWA：`public/manifest.webmanifest` + `index.html` 里的 iOS meta。manifest 也要鉴权，所以 `<link rel="manifest">` 必须带 `crossorigin="use-credentials"`。没有 Service Worker（不在浏览器里缓存任何照片）。全屏深色界面用 `ui/themeColor.ts` 的 `useThemeColor()` 临时改状态栏颜色；断网 / 登录过期由 `ConnectionBanner` 提示并提供重新加载（独立窗口里没有刷新按钮）。独立窗口里有自己的下拉刷新（`ui/PullToRefresh.tsx`，系统的下拉刷新被 `overscroll-behavior: none` 关掉了）：页面在顶部时下拉过阈值松手，`invalidateQueries()` 重新请求当前页面的数据（连接已中断时整页重新加载）；固定定位的东西（查看器、弹窗、地图、拖动条）、touch-action: none 和没滚到顶的滚动区域里不触发，刷新期间不接受新的下拉。图标由 `favicon.svg` 的图案渲染而来，改图标时一起更新几张 PNG。

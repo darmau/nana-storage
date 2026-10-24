@@ -2,13 +2,14 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { JOB_STALE_MS, MAX_MONTHLY_BUDGET_USD, MIN_MONTHLY_BUDGET_USD, PROCESSOR_POOL_SIZE, SIMILAR_SCAN_CRON_BATCH, type JobMessage } from "@nana/shared";
 import { authenticate } from "./auth";
+import { compress } from "./compress";
 import { device } from "./device";
 import { conditionalGroups, dataEtag, etagMatches, noValidator, openSession } from "./dbcache";
 import { downloads } from "./downloads";
 import { files } from "./files";
 import { guardStub } from "./guard";
 import { cancelJobs, handleJobMessage, requeueAfterDevice, requeuePending, retryFailed, RETRY_FAILED_MAX } from "./jobs";
-import "./process"; // 注册 process 任务
+import "./process"; // 注册 process / rotate / compress 任务
 import { assetJobs, failedJobs, jobsOverview } from "./progress";
 import { purgeTrash } from "./purge";
 import { forbidden, isSafeMutation, withSecurityHeaders } from "./security";
@@ -70,6 +71,7 @@ api.route("/downloads", downloads);
 api.route("/map", map);
 api.route("/stats", stats);
 api.route("/device", device);
+api.route("/compress", compress);
 api.route("/", library);
 api.route("/", similar);
 api.route("/", similarGroups);

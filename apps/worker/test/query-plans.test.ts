@@ -219,6 +219,23 @@ for (const stats of [false, true]) describe(`list query plans ${stats ? "with sk
 		}
 	});
 
+	// 原图压缩的候选：顺着 asset_files_compress 按大小倒序读，读到下限就停，不排序、不扫 assets
+	it("compression candidates read asset_files_compress in order", async () => {
+		const list = await capture(`/compress/candidates?min=${5 * 1024 ** 2}`);
+		const summary = await capture(`/compress/summary?min=${5 * 1024 ** 2}`);
+		const stmts = [...list, ...summary].filter((s) => /INDEXED BY asset_files_compress\b/.test(s.sql));
+		expect(stmts.length).toBe(2);
+		for (const stmt of stmts) {
+			const p = await plan(stmt.sql, stmt.binds);
+			expect(p, p).toMatch(/SEARCH f USING INDEX asset_files_compress \(size>\?\)/);
+			expect(p, p).toMatch(/SEARCH a USING INDEX sqlite_autoindex_assets_1/);
+			expect(p, p).not.toMatch(/TEMP B-TREE/);
+		}
+		const done = summary.find((s) => s.sql.includes("asset_files_compressed"));
+		const p = await plan(done!.sql, done!.binds);
+		expect(p, p).toMatch(/asset_files_compressed/);
+	});
+
 	// FTS5 的非全文列没有索引：按条目 id 过滤 FTS 表本身会扫描整个索引（线上每处理一张照片读 24 万行），只能按 rowid 定位
 	it("full-text index writes locate rows by rowid", async () => {
 		const stmts = await captureDirect(() => [

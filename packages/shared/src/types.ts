@@ -9,7 +9,8 @@ export type FileRole =
 	| "poster"
 	| "video_preview";
 
-export type JobKind = "process" | "rotate";
+/** compress：原图压缩（src/compress.ts），1 次容器调用，不改缩略图和预览。 */
+export type JobKind = "process" | "rotate" | "compress";
 
 /** 队列消息只携带任务 ID，真实状态在 D1 的 jobs 表里。 */
 export interface JobMessage {

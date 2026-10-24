@@ -318,3 +318,28 @@ export const LIBRARY_STATS_DAYS = 366;
 export const LIBRARY_STATS_CAMERAS = 100;
 /** 最大的照片 / 视频各列出多少个。 */
 export const LARGEST_MAX = 50;
+
+// ---------------------------------------------------------------- 原图压缩（整理 › 原图压缩，src/compress.ts）
+
+/**
+ * JPEG 原件按这个质量重新编码（libvips + libjpeg-turbo，Huffman 优化）。尺寸不变，色度抽样跟原图（4:2:0 的保持 4:2:0，其余 4:4:4），
+ * 元数据段（EXIF 含厂商 MakerNote 和缩略图、XMP、ICC、IPTC）逐字节原样搬过去。
+ * 90 在照片上肉眼看不出差别（放大到 100% 也很难分辨）；体积取决于每像素的码率，不是固定的 MB 数：
+ * 原图 Q95–100 的通常能省 50–75%，本来就是 Q90 左右的几乎省不了（按 COMPRESS_MIN_SAVING 跳过）。
+ */
+export const COMPRESS_JPEG_QUALITY = 90;
+/** 压缩后至少要小这么多（比例），否则保留原图、记成“不值得压缩”，以后不再列出。 */
+export const COMPRESS_MIN_SAVING = 0.15;
+/** 列表里能选的最小原图大小（低于它的压缩了也省不了多少）。 */
+export const COMPRESS_MIN_BYTES = 2 * 1024 ** 2;
+/** 超过这个大小的不压缩（容器里要整个读进内存，原图和压缩后的各一份）。 */
+export const COMPRESS_MAX_BYTES = 400 * 1024 ** 2;
+/** 每次请求最多给这么多张建任务（只由用户点击触发）。 */
+export const COMPRESS_BATCH_MAX = 500;
+/**
+ * 单张的硬超时：1 vCPU 上解码 + 编码 1 亿像素约 20–40 秒，再加上校验（完整解码一遍、缩小比对）。
+ * 每张 1 次容器调用，一般 3–20 秒；总量受月度费用上限约束。
+ */
+export const COMPRESS_TIMEOUT_MS = 3 * 60_000;
+/** 压缩后的图和原图缩到长边 1024 后，逐像素平均差值（0–255）超过它就当作出错（任务失败，原图不动）。Q90 通常在 0.5 以下。 */
+export const COMPRESS_MAX_DIFF = 2;

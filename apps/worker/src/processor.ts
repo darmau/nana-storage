@@ -1,5 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 import {
+	COMPRESS_JPEG_QUALITY,
+	COMPRESS_MAX_BYTES,
+	COMPRESS_MAX_DIFF,
+	COMPRESS_MIN_SAVING,
+	COMPRESS_TIMEOUT_MS,
 	CONTAINER_INACTIVITY_MS,
 	FULL_PREVIEW_TIMEOUT_MS,
 	IMAGE_JOB_TIMEOUT_MS,
@@ -108,6 +113,13 @@ export interface MetaOutput {
 }
 export interface TranscodeOutput {
 	size: number;
+}
+/** 原图压缩（lib.mjs 的 compressTask）。sha256 / size 是输入的（完整性校验）；skipped 不为 null 时没有 out，也没有写 R2。 */
+export interface CompressOutput {
+	sha256: string;
+	size: number;
+	skipped: string | null;
+	out: { sha256: string; size: number; crc32: number } | null;
 }
 
 const poolName = (i: number) => `proc-${i}`;
@@ -314,6 +326,43 @@ export class Processor extends DurableObject<Env> {
 					this.env.PHOTOS.put(outputKey, fixed.readable, { httpMetadata: { contentType: "video/mp4" } }),
 				]);
 				return { size: written.size };
+			},
+		);
+	}
+
+	/**
+	 * 原图压缩：容器返回 JSON + 压缩后的 JPEG，后半段直接流进 R2 的 outputKey（一个新 key，原图不动）。
+	 * R2 按容器算的 sha256 校验写入的字节，对不上就写入失败。是否换掉原图由调用方（src/compress.ts）决定。
+	 */
+	async compress(inputKey: string, outputKey: string): Promise<Result<CompressOutput>> {
+		return this.call(
+			"compress",
+			inputKey,
+			{
+				"x-quality": String(COMPRESS_JPEG_QUALITY),
+				"x-min-saving": String(COMPRESS_MIN_SAVING),
+				"x-max-bytes": String(COMPRESS_MAX_BYTES),
+				"x-max-diff": String(COMPRESS_MAX_DIFF),
+			},
+			COMPRESS_TIMEOUT_MS,
+			async (res) => {
+				const total = Number(res.headers.get("content-length"));
+				const jsonLength = Number(res.headers.get("x-json-length"));
+				if (!res.body || !(total >= jsonLength && jsonLength > 0)) throw new Error("compress returned a malformed stream");
+				const { head, rest } = await splitStream(res.body, jsonLength);
+				const body = JSON.parse(new TextDecoder().decode(head)) as CompressOutput;
+				if (!body.out) {
+					await rest.cancel().catch(() => {});
+					return { sha256: body.sha256, size: body.size, skipped: body.skipped ?? "unknown", out: null };
+				}
+				if (total - jsonLength !== body.out.size) throw new Error("compress returned a wrong length");
+				const fixed = new FixedLengthStream(body.out.size);
+				const [, written] = await Promise.all([
+					rest.pipeTo(fixed.writable),
+					this.env.PHOTOS.put(outputKey, fixed.readable, { httpMetadata: { contentType: "image/jpeg" }, sha256: body.out.sha256 }),
+				]);
+				if (written.size !== body.out.size) throw new Error("compress output size mismatch");
+				return { sha256: body.sha256, size: body.size, skipped: null, out: body.out };
 			},
 		);
 	}

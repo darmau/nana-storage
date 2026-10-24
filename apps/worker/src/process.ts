@@ -7,6 +7,7 @@ import {
 	transcodeTimeoutMs,
 	type JobKind,
 } from "@nana/shared";
+import { compressAsset } from "./compress";
 import { derivedKey } from "./derived";
 import { parseMeta, type Meta } from "./exif";
 import { handlers, type RunningJob } from "./jobs";
@@ -119,7 +120,7 @@ export const previewEdgeOf = (a: Pick<AssetRow, "preview_target">) => Math.max(P
 /** 剩下的时间不够这么多就不转码了。 */
 const MIN_TRANSCODE_TIMEOUT_MS = 30_000;
 
-export type ProcessorLike = Pick<ReturnType<typeof processorStub>, "derive" | "meta" | "transcode">;
+export type ProcessorLike = Pick<ReturnType<typeof processorStub>, "derive" | "meta" | "transcode" | "compress">;
 export type GetProcessor = (env: Env, slot: number) => ProcessorLike;
 
 /** getProcessor 可以替换，方便测试时不启动容器。 */
@@ -156,7 +157,8 @@ export async function processAsset(
 		throw new JobError("integrity check failed (sha256/size mismatch)", seconds, true);
 	}
 
-	const crcUpdates = [env.DB.prepare("UPDATE asset_files SET crc32 = ? WHERE id = ?").bind(d.crc32, primary.id)];
+	// 按 sha256 定位：处理期间原图被压缩过（compress 任务换了文件），这里的 CRC32 是旧文件的，不能写到新文件上
+	const crcUpdates = [env.DB.prepare("UPDATE asset_files SET crc32 = ? WHERE id = ? AND sha256 = ?").bind(d.crc32, primary.id, d.sha256)];
 
 	// 附件：只校验完整性和读元数据
 	let videoMeta: Meta | null = null;
@@ -170,7 +172,7 @@ export async function processAsset(
 			throw new JobError(`integrity check failed for ${f.role}`, seconds, true);
 		}
 		if (f.role === "live_video") videoMeta = m.meta;
-		crcUpdates.push(env.DB.prepare("UPDATE asset_files SET crc32 = ? WHERE id = ?").bind(m.crc32, f.id));
+		crcUpdates.push(env.DB.prepare("UPDATE asset_files SET crc32 = ? WHERE id = ? AND sha256 = ?").bind(m.crc32, f.id, m.sha256));
 	}
 
 	const parsed = parseMeta(d.meta, { clientMtime: asset.client_mtime, clientTzOffsetMin: asset.tz_offset_min });
@@ -427,7 +429,9 @@ export const processorHandlers: Record<
 > = {
 	process: processAsset,
 	rotate: rotateAsset,
+	compress: compressAsset,
 };
 
 handlers.process = (job, env) => processAsset(job, env);
 handlers.rotate = (job, env) => rotateAsset(job, env);
+handlers.compress = (job, env) => compressAsset(job, env);

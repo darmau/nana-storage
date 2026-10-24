@@ -36,7 +36,7 @@ const MESSAGES = {
 		failedBadge: "失败",
 		processing: "处理中",
 		steps: { decode: "读取元数据", images: "生成预览", thumb: "生成预览", fingerprint: "计算指纹", faces: "识别人脸" },
-		stages: { queued: "等待", local: "读取本机暂存", download: "下载原件", meta: "读取附件", transcode: "转码视频", upload: "上传结果", complete: "写回服务器" },
+		stages: { queued: "等待", local: "读取本机暂存", download: "下载原件", meta: "读取附件", transcode: "转码视频", compress: "压缩原图", upload: "上传结果", complete: "写回服务器" },
 		form: {
 			site: "站点地址",
 			name: "设备名",
@@ -146,6 +146,7 @@ const MESSAGES = {
 			download: "Downloading original",
 			meta: "Reading attachments",
 			transcode: "Transcoding video",
+			compress: "Compressing original",
 			upload: "Uploading results",
 			complete: "Saving to server",
 		},

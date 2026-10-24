@@ -10,6 +10,7 @@ import { thumbUrl } from "../timeline/types";
 import { IconArchive, IconLookalike, IconTrash } from "../ui/icons";
 import { DuplicateGroupsSkeleton } from "../ui/Skeleton";
 import { useDocumentTitle } from "../ui/title";
+import { OrganizeTitle } from "./OrganizePages";
 import { DuplicateCompare, comparePill } from "./DuplicateCompare";
 
 /** 撤销条显示多久 */
@@ -169,7 +170,7 @@ export function SimilarGroupsPage() {
 	return (
 		<>
 			<div className="space-y-5">
-				<h1 className="page-title pt-1">{t.lookalike.title}</h1>
+				<OrganizeTitle title={t.lookalike.title} />
 				<p className="flex items-start gap-2.5 rounded-2xl bg-notice px-4 py-3 text-sm">
 					<IconLookalike size={18} className="mt-0.5 shrink-0 text-muted" />
 					<span>{t.lookalike.intro}</span>

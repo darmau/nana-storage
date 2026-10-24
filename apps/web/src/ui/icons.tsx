@@ -349,6 +349,26 @@ export const IconLookalike = icon(
 	</>,
 );
 
+/** 整理：魔术棒加两颗星 */
+export const IconOrganize = icon(
+	<>
+		<path d="m4 20 11-11" />
+		<path d="m13 7 2-2 4 4-2 2" />
+		<path d="M6 3v4M4 5h4" />
+		<path d="M19 15v4M17 17h4" />
+	</>,
+);
+
+/** 原图压缩：四角向内收的箭头 */
+export const IconCompress = icon(
+	<>
+		<path d="M4 9h5V4" />
+		<path d="M20 9h-5V4" />
+		<path d="M4 15h5v5" />
+		<path d="M20 15h-5v5" />
+	</>,
+);
+
 export const IconLogo = ({ size = 28 }: { size?: number }) => (
 	<svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="shrink-0">
 		<rect width="32" height="32" rx="8" className="fill-fg" />

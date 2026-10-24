@@ -1,4 +1,5 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
+import { containerCost, type GuardStatus } from "@nana/shared";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api, errorText } from "../api";
 import { t } from "../i18n";
@@ -9,6 +10,7 @@ import {
 	IconArchive,
 	IconCheck,
 	IconClose,
+	IconCompress,
 	IconDownload,
 	IconEdit,
 	IconFolderMove,
@@ -21,7 +23,7 @@ import {
 	IconSimilar,
 	IconTrash,
 } from "../ui/icons";
-import { addToAlbum, batch, createSmartSet, downloadZip, invalidateLibrary, removeFromAlbum, setSmartSetExamples } from "./actions";
+import { addToAlbum, batch, compressOriginals, createSmartSet, downloadZip, invalidateLibrary, removeFromAlbum, setSmartSetExamples } from "./actions";
 import { BatchMetaEditor } from "./BatchMetaEditor";
 import { AlbumPicker, FolderPicker, SmartSetPicker } from "./Pickers";
 import { MAX_SELECTION, useSelection } from "./selection";
@@ -40,7 +42,9 @@ export type BarContext =
 	/** 主题的“样本”（设为正例 / 反例、移出样本）和“判断”（是 / 否）两个标签 */
 	| { kind: "smartSet"; setId: string; view: "samples" | "review" }
 	/** 主题的“结果”：和资料库一样的操作（主要是加入相册），另外可以标成“不属于这个主题” */
-	| { kind: "topicResults"; setId: string };
+	| { kind: "topicResults"; setId: string }
+	/** 整理 › 原图压缩的候选：主要操作是“压缩原图”，另外可以下载、删除 */
+	| { kind: "compress" };
 
 /** 加入主题样本后的提示：其中和分类器矛盾的张数。 */
 const samplesText = (label: 1 | -1) => (r: { conflicts: number }) => t.actions.addedSamples(label, r.conflicts);
@@ -64,6 +68,32 @@ const confirmDeleteForever = (n: number, fn: () => unknown) =>
 	}).then((ok) => {
 		if (ok) void fn();
 	});
+
+/** 估算用：一张大 JPEG 的容器秒数（解码 + 编码 + 校验，几千万像素的约 10–30 秒）。只用来提醒，不限制。 */
+const COMPRESS_ESTIMATE_SECONDS = 15;
+
+/**
+ * 原图压缩会替换原图，先确认。顺带提醒云端处理的时间和费用（和上传面板的估算同一个算法，扣掉本月剩下的免费额度）；
+ * 设备端接管时由设备处理，不产生容器费用。成本防护只读一次（打开确认框时）。
+ */
+async function confirmCompress(qc: QueryClient, n: number, fn: () => unknown) {
+	const guard = await qc.fetchQuery({ queryKey: ["guard"], queryFn: () => api<GuardStatus>("/guard"), staleTime: 30_000 }).catch(() => null);
+	const seconds = n * COMPRESS_ESTIMATE_SECONDS;
+	let cost = "";
+	if (guard?.device) cost = t.compress.onDevice;
+	else if (guard) {
+		const usd = containerCost(guard.month.containerSeconds + seconds) - containerCost(guard.month.containerSeconds);
+		cost = t.compress.estimate(Math.max(1, Math.round(seconds / 60)), usd <= 0 ? "$0" : usd < 0.01 ? "< $0.01" : `$${usd.toFixed(2)}`);
+	}
+	const ok = await confirmDialog({
+		title: t.compress.confirmTitle(n),
+		message: `${t.compress.confirmMessage}${cost ? ` ${cost}` : ""}`,
+		confirmLabel: t.compress.action,
+		danger: true,
+	});
+	if (ok) void fn();
+}
+const compressDone = (r: { queued: number; skipped: number }) => t.compress.queuedDone(r.queued, r.skipped);
 
 /**
  * 照片的操作（收藏、加入相册、移动、下载、删除 …）。多选操作栏和右键菜单共用，
@@ -252,6 +282,22 @@ export function useAssetMenu() {
 			return [...items, ...personItems(context, () => void run(() => removeFromPerson(qc, personId, ids)), () => pick("person", ids))];
 		}
 
+		if (context.kind === "compress") {
+			return [
+				...head,
+				"sep",
+				{ label: t.compress.action, icon: <IconCompress size={18} />, onSelect: () => void confirmCompress(qc, ids.length, () => run(() => compressOriginals(qc, ids), compressDone)) },
+				{ label: multi ? t.actions.download : t.actions.downloadOriginal, icon: <IconDownload size={18} />, onSelect: () => download(ids) },
+				"sep",
+				{
+					label: t.actions.delete,
+					icon: <IconTrash size={18} />,
+					danger: true,
+					onSelect: () => confirmTrash(ids.length, () => run(() => batch(qc, ids, { action: "trash" }))),
+				},
+			];
+		}
+
 		if (context.kind === "trash") {
 			return [
 				...head,
@@ -382,6 +428,25 @@ export function SelectionBar() {
 							<span>{it.label}</span>
 						</button>
 					))
+				) : context.kind === "compress" ? (
+					<>
+						<button className={btn} disabled={busy} onClick={() => void confirmCompress(qc, ids.length, () => run(() => compressOriginals(qc, ids), compressDone))}>
+							<IconCompress />
+							<span>{t.compress.action}</span>
+						</button>
+						<button className={btn} disabled={busy} onClick={() => download(ids)}>
+							<IconDownload />
+							<span className={label}>{t.actions.download}</span>
+						</button>
+						<button
+							className={`${btn} text-danger`}
+							disabled={busy}
+							onClick={() => confirmTrash(ids.length, () => run(() => batch(qc, ids, { action: "trash" })))}
+						>
+							<IconTrash />
+							<span className={label}>{t.actions.delete}</span>
+						</button>
+					</>
 				) : context.kind === "trash" ? (
 					<>
 						<button className={btn} disabled={busy} onClick={() => run(() => batch(qc, ids, { action: "restore" }))}>

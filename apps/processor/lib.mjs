@@ -24,6 +24,7 @@ import { frost, frostSize, netpbm, parseMask, rasterizeMask } from "./mask.mjs";
  *                       响应里的 mask 原样带回实际用过的笔画，Worker 据此确认（旧版容器不认这个头，不能悄悄生成没打码的预览）。
  *                       faces：{ model, faces: [{ x, y, w, h, px, score, sharpness, embedding }], sprite }，见 faces.mjs。视频不算。
  *   /tasks/transcode  → video/mp4（带 Content-Length）
+ *   /tasks/compress   → 原图压缩（compressTask）：JSON 加紧跟着的压缩后的 JPEG（x-json-length，同 derive 的 stream）。
  *
  * 每个外部进程都有硬超时（SIGKILL）。临时文件由调用方在任务结束时删除。
  */
@@ -633,4 +634,162 @@ export async function transcodeTask(input, dir, { timeoutMs }) {
 		{ timeoutMs, capture: false },
 	);
 	return out;
+}
+
+// ---------------------------------------------------------------- 原图压缩（/tasks/compress）
+
+const SOI = 0xd8;
+const EOI = 0xd9;
+const SOS = 0xda;
+const COM = 0xfe;
+const isApp = (m) => (m >= 0xe0 && m <= 0xef) || m === COM;
+/** 没有长度字段的标记：SOI、RST0–7、TEM */
+const bare = (m) => m === SOI || (m >= 0xd0 && m <= 0xd7) || m === 0x01;
+/** 基线 / 扩展 / 渐进的 8 位 Huffman 编码，libjpeg 能原样解码再编码；无损、算术编码、分层的不碰 */
+const PLAIN_SOF = new Set([0xc0, 0xc1, 0xc2]);
+const isSof = (m) => m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc;
+
+/**
+ * 解析 JPEG 的段结构（不解码像素）：
+ *   meta  第一个 SOS 之前的 APPn / COM 段（含标记和长度，原样的字节）
+ *   sof   { marker, precision, width, height, components: [{ h, v }] }
+ *   end   主图 EOI 之后的偏移；后面还有数据（MPF 附图：HDR 增益图、景深图；动态照片的视频……）时 end < 文件长度
+ * 不是完整的 JPEG 时抛错。
+ */
+export function parseJpeg(buf) {
+	if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== SOI) throw new Error("not a jpeg");
+	const meta = [];
+	let sof = null;
+	let scanned = false;
+	let i = 2;
+	while (i + 1 < buf.length) {
+		if (buf[i] !== 0xff) throw new Error("bad jpeg marker");
+		const m = buf[i + 1];
+		if (m === 0xff) {
+			i++; // 段之间的填充
+			continue;
+		}
+		if (m === EOI) return { meta, sof, end: i + 2 };
+		if (bare(m)) {
+			i += 2;
+			continue;
+		}
+		if (i + 4 > buf.length) break;
+		const next = i + 2 + buf.readUInt16BE(i + 2);
+		if (next > buf.length) break;
+		const seg = buf.subarray(i, next);
+		if (isApp(m) && !scanned) meta.push(seg);
+		if (isSof(m) && !sof && seg.length >= 10) {
+			const n = seg[9];
+			const components = [];
+			for (let c = 0; c < n && 10 + c * 3 + 1 < seg.length; c++) components.push({ h: seg[11 + c * 3] >> 4, v: seg[11 + c * 3] & 15 });
+			sof = { marker: m, precision: seg[4], height: seg.readUInt16BE(5), width: seg.readUInt16BE(7), components };
+		}
+		i = next;
+		if (m === SOS) {
+			scanned = true;
+			// 熵编码数据：一直到下一个真正的标记（0xFF00 是转义，RSTn 在数据中间）
+			for (;;) {
+				i = buf.indexOf(0xff, i);
+				if (i < 0 || i + 1 >= buf.length) throw new Error("truncated jpeg");
+				const b = buf[i + 1];
+				if (b === 0 || (b >= 0xd0 && b <= 0xd7)) i += 2;
+				else break;
+			}
+		}
+	}
+	throw new Error("truncated jpeg");
+}
+
+/** 新编码的文件去掉自己的 APPn / COM 段（libvips 写的 JFIF 头），换上原图的元数据段。 */
+function spliceMeta(original, encoded, meta) {
+	let i = 2;
+	while (i + 3 < encoded.length && encoded[i] === 0xff && isApp(encoded[i + 1])) i += 2 + encoded.readUInt16BE(i + 2);
+	return Buffer.concat([encoded.subarray(0, 2), ...meta, encoded.subarray(i)]);
+}
+
+/** 只是描述编码方式的段不搬：APP14（Adobe 的颜色变换标志，新编码由 libjpeg 决定）、MPF（指向附图，带附图的不压缩） */
+const keepSegment = (seg) => seg[1] !== 0xee && !(seg[1] === 0xe2 && seg.subarray(4, 8).toString("latin1") === "MPF\0");
+
+/** 压缩前后必须一样的元数据（exiftool -n 的字段名）。段是原样搬过去的，这里只是确认一遍 */
+const COMPRESS_SAME_TAGS = ["DateTimeOriginal", "SubSecTimeOriginal", "OffsetTimeOriginal", "GPSLatitude", "GPSLongitude", "Orientation", "Make", "Model", "ContentIdentifier"];
+
+async function vipsNumber(args) {
+	return Number((await run("vips", args, { timeoutMs: 120_000 })).toString().trim());
+}
+
+/**
+ * 原图压缩：JPEG 原件按 quality 重新编码，像素尺寸不变，元数据段原样保留（见 shared 的 COMPRESS_JPEG_QUALITY）。
+ * 返回 { body, outPath }。body：{ sha256, size, crc32（输入的）, skipped, out: { sha256, size, crc32 } | null }。
+ * 不压缩时 outPath 为 null，skipped 是原因（Worker 记成“不值得压缩”，以后不再列出）：
+ *   not-jpeg      不是 8 位 Huffman 编码的 JPEG（无损 / 算术编码 / 12 位）
+ *   colourspace   不是 1 或 3 个通道（CMYK 之类）
+ *   extra-data    主图后面还有数据（HDR 增益图、景深图、动态照片的视频……），重新编码会丢掉
+ *   too-large     超过 maxBytes
+ *   not-smaller   省不到 minSaving
+ * 压缩后校验：能完整解码、尺寸和通道一样、关键元数据一样、缩小后和原图逐像素的平均差值不超过 maxDiff。
+ * 任何一项不对就抛错（任务失败，原图不动）。
+ */
+export async function compressTask(input, dir, { quality, minSaving, maxBytes, maxDiff, onStep = () => {} }) {
+	if (!Number.isInteger(quality) || quality < 50 || quality > 100) throw new Error("bad quality");
+	const base = { sha256: input.sha256, size: input.size, crc32: input.crc32 };
+	const skip = (skipped) => ({ body: { ...base, skipped, out: null }, outPath: null });
+	if (input.size > maxBytes) return skip("too-large");
+	onStep("decode");
+	const src = await readFile(input.path);
+	let parsed;
+	try {
+		parsed = parseJpeg(src);
+	} catch {
+		return skip("not-jpeg");
+	}
+	const { sof } = parsed;
+	if (!sof || !PLAIN_SOF.has(sof.marker) || sof.precision !== 8) return skip("not-jpeg");
+	if (sof.components.length !== 1 && sof.components.length !== 3) return skip("colourspace");
+	if (src.subarray(parsed.end).some((b) => b !== 0 && b !== 0xff)) return skip("extra-data");
+
+	onStep("encode");
+	const y = sof.components[0];
+	// 原图是 4:2:0 的保持 4:2:0；4:4:4、4:2:2 和灰度不抽样（libjpeg 只支持这两种），体积大一点但不损失色度
+	const subsample = sof.components.length === 3 && y.h === 2 && y.v === 2 ? "on" : "off";
+	const encoded = join(dir, "encoded.jpg");
+	const opts = [`Q=${quality}`, "optimize_coding", "keep=none", `subsample_mode=${subsample}`, ...(sof.marker === 0xc2 ? ["interlace"] : [])];
+	await run("vips", ["copy", input.path, `${encoded}[${opts.join(",")}]`], { timeoutMs: 150_000 });
+	const out = spliceMeta(src, await readFile(encoded), parsed.meta.filter(keepSegment));
+	if (out.length > input.size * (1 - minSaving)) return skip("not-smaller");
+
+	onStep("verify");
+	const outPath = join(dir, "compressed.jpg");
+	await writeBuffer(outPath, out);
+	const check = parseJpeg(out);
+	if (
+		check.end !== out.length ||
+		check.sof?.width !== sof.width ||
+		check.sof?.height !== sof.height ||
+		check.sof?.components.length !== sof.components.length
+	) {
+		throw new Error("compressed image does not match the original");
+	}
+	// 完整解码一遍（截断、损坏的数据会报错）
+	await run("vips", ["avg", `${outPath}[fail_on=warning]`], { timeoutMs: 120_000 });
+	// 缩小后逐像素比对：两边方向标签一样，缩出来的尺寸也一样
+	const [a, b, d, e] = ["cmp-a.v", "cmp-b.v", "cmp-d.v", "cmp-e.v"].map((n) => join(dir, n));
+	await run("vips", ["thumbnail", input.path, a, "1024"], { timeoutMs: 60_000 });
+	await run("vips", ["thumbnail", outPath, b, "1024"], { timeoutMs: 60_000 });
+	await run("vips", ["subtract", a, b, d], { timeoutMs: 30_000 });
+	await run("vips", ["abs", d, e], { timeoutMs: 30_000 });
+	const diff = await vipsNumber(["avg", e]);
+	if (!(diff <= maxDiff)) throw new Error(`compressed image differs too much (${diff.toFixed(2)})`);
+	const [before, after] = await Promise.all([exif(input.path), exif(outPath)]);
+	const changed = COMPRESS_SAME_TAGS.filter((k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null));
+	if (changed.length) throw new Error(`metadata changed: ${changed.join(", ")}`);
+
+	return {
+		body: {
+			...base,
+			skipped: null,
+			out: { sha256: createHash("sha256").update(out).digest("hex"), size: out.length, crc32: crc32(out) >>> 0 },
+		},
+		outPath,
+	};
 }

@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
-import { deriveTask, metaTask, parseCrop, saveInput, transcodeTask } from "./lib.mjs";
+import { compressTask, deriveTask, metaTask, parseCrop, saveInput, transcodeTask } from "./lib.mjs";
 
 /**
  * 容器的 HTTP 外壳。处理代码在 lib.mjs（设备端处理共用），任务（都是 POST，请求体是原始文件）：
@@ -20,6 +20,8 @@ import { deriveTask, metaTask, parseCrop, saveInput, transcodeTask } from "./lib
  *                       x-mask：打码的笔画（mask.mjs，最多约 11 KB）：缩略图和预览上盖住的地方变成毛玻璃，同样返回底图 base；
  *                       响应的 mask 原样带回。
  *   /tasks/transcode  → video/mp4（带 Content-Length）
+ *   /tasks/compress   → JSON { sha256, size, crc32, skipped, out } + 紧跟着的压缩后的 JPEG（x-json-length 是 JSON 的字节数；
+ *                       不压缩时只有 JSON）。x-quality、x-min-saving、x-max-bytes、x-max-diff 见 shared 的 COMPRESS_*。
  *
  * 临时文件在请求结束时删除。同一时间只处理一个任务，避免多个 ffmpeg 抢内存（容器只有 1 vCPU）。
  */
@@ -75,6 +77,26 @@ const tasks = {
 		const { size } = await stat(out);
 		res.writeHead(200, { "content-type": "video/mp4", "content-length": String(size) });
 		await pipeline(createReadStream(out), res);
+	},
+
+	async compress(req, res, dir) {
+		const num = (name) => Number(req.headers[name]);
+		const { body, outPath } = await compressTask(await receive(req, dir), dir, {
+			quality: num("x-quality"),
+			minSaving: num("x-min-saving"),
+			maxBytes: num("x-max-bytes"),
+			maxDiff: num("x-max-diff"),
+		});
+		const head = Buffer.from(JSON.stringify(body));
+		const size = outPath ? (await stat(outPath)).size : 0;
+		res.writeHead(200, {
+			"content-type": "application/octet-stream",
+			"content-length": String(head.length + size),
+			"x-json-length": String(head.length),
+		});
+		res.write(head);
+		if (outPath) await pipeline(createReadStream(outPath), res);
+		else res.end();
 	},
 };
 

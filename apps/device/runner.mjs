@@ -3,14 +3,14 @@ import { mkdir, mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { deriveTask, metaTask, saveInput, transcodeTask } from "../processor/lib.mjs";
+import { compressTask, deriveTask, metaTask, saveInput, transcodeTask } from "../processor/lib.mjs";
 import { ApiError } from "./client.mjs";
 
 /**
  * progress：界面用的进度（main.mjs 的任务条目），这里只往上写字段：
- *   stage   local / download / derive / meta / transcode / upload / complete
+ *   stage   local / download / derive / meta / transcode / compress / upload / complete
  *   source  输入从哪里来：local 本机暂存的上传文件 / download 从服务器下载（有一个是下载的就算 download）
- *   step    derive 里的细分步骤（decode / images / thumb / fingerprint / faces，见 lib.mjs）
+ *   step    derive 里的细分步骤（decode / images / thumb / fingerprint / faces，见 lib.mjs）；compress 里是 decode / encode / verify
  *   bytes / total  下载进度
  *   thumb   缩略图生成好之后的字节（只在内存里，界面显示用）
  */
@@ -77,7 +77,7 @@ export async function runJob(api, plan, progress = {}, local = null) {
 		}
 		progress.source ??= plan.inputs.length ? "local" : null;
 
-		const results = { derive: null, meta: {}, transcoded: false };
+		const results = { derive: null, meta: {}, transcoded: false, compress: null };
 		const d = plan.derive;
 		if (d) {
 			onStage("derive");
@@ -108,6 +108,24 @@ export async function runJob(api, plan, progress = {}, local = null) {
 			results.meta[id] = await metaTask(inputs.get(id));
 		}
 		if (plan.transcode) results.transcoded = await transcode(call, base, q, plan, inputs, results, dir, onStage);
+		const c = plan.compress;
+		if (c) {
+			onStage("compress");
+			const work = join(dir, "compress");
+			await mkdir(work);
+			const r = await compressTask(inputs.get(c.fileId), work, {
+				quality: c.quality,
+				minSaving: c.minSaving,
+				maxBytes: c.maxBytes,
+				maxDiff: c.maxDiff,
+				onStep: (step) => (progress.step = step),
+			});
+			results.compress = r.body;
+			if (r.outPath) {
+				onStage("upload");
+				await upload(call, base, q, "compressed", plan.outputs.compressed, r.outPath);
+			}
+		}
 
 		onStage("complete");
 		return (await call(`${base}/complete`, { method: "POST", json: { t: plan.token, results } })).status;

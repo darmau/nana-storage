@@ -15,7 +15,7 @@ const RESULTS = T.results;
 const STEPS = T.steps;
 const STAGES = T.stages;
 /** 进度条：每个阶段大致的位置（0–1） */
-const PHASE = { queued: 0, decode: 0.3, images: 0.35, thumb: 0.55, fingerprint: 0.6, faces: 0.7, upload: 0.82, meta: 0.86, transcode: 0.88, complete: 0.95 };
+const PHASE = { queued: 0, decode: 0.3, images: 0.35, thumb: 0.55, fingerprint: 0.6, faces: 0.7, upload: 0.82, meta: 0.86, transcode: 0.88, compress: 0.5, complete: 0.95 };
 
 let current = null;
 let server = null;

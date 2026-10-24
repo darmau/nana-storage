@@ -63,6 +63,32 @@ export async function createJob(env: Env, assetId: string, kind: JobKind): Promi
 }
 
 /**
+ * 一次给多个条目建同一种任务（原图压缩的批量操作）。插入按 batch 写，入队按 sendBatch 发；
+ * 入队失败时撤掉还没入队的那些再抛错（和 createJob 一样，不留没有消息的 pending 任务）。熔断时只写 D1 不入队。
+ * 只由用户点击触发，调用方限制条数（COMPRESS_BATCH_MAX）。返回建好的个数。
+ */
+export async function createJobs(env: Env, assetIds: string[], kind: JobKind): Promise<number> {
+	const rows = assetIds.map((id) => jobInsert(env.DB, id, kind));
+	for (let i = 0; i < rows.length; i += 50) await env.DB.batch(rows.slice(i, i + 50).map((r) => r.stmt));
+	if (await guardStub(env).isTripped()) return rows.length;
+	for (let i = 0; i < rows.length; i += 100) {
+		try {
+			await env.JOBS.sendBatch(rows.slice(i, i + 100).map((r) => ({ body: { jobId: r.id } satisfies JobMessage })));
+		} catch (e) {
+			const rest = rows.slice(i).map((r) => r.id);
+			for (let j = 0; j < rest.length; j += 80) {
+				const chunk = rest.slice(j, j + 80);
+				await env.DB.prepare(`DELETE FROM jobs WHERE id IN (${chunk.map(() => "?").join(",")}) AND status = 'pending' AND attempts = 0`)
+					.bind(...chunk)
+					.run();
+			}
+			throw e;
+		}
+	}
+	return rows.length;
+}
+
+/**
  * 插入 pending 任务的语句，放进和条目状态修改同一个 batch，保证两者一起落地。
  * when 是额外的 SQL 条件（参数接在后面），不满足就不插入；用 RETURNING 的结果判断插没插。插入之后调用 enqueueJob。
  */

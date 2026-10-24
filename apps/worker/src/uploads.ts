@@ -80,7 +80,8 @@ const expectedPartSize = (size: number, n: number) =>
 export const UPLOAD_ABANDONED_MS = 3600_000;
 
 /**
- * 已经存在的文件：sha256 → 条目 id。
+ * 已经存在的文件：sha256 → 条目 id。压缩过的原图按压缩前的 sha256（source_sha256）也算存在，
+ * 重新上传同一个原始文件不会多出一份。
  * 上传中断的条目（比如 Live Photo 的图片传完了、视频没传完）单独列出：它们不算重复，
  * 否则重新上传同一组文件时会被当成重复跳过，中断的条目永远补不上。
  */
@@ -89,14 +90,19 @@ async function existingAsset(env: Env, hashes: string[]): Promise<{ found: Map<s
 	const abandoned = new Set<string>();
 	for (let i = 0; i < hashes.length; i += 90) {
 		const chunk = hashes.slice(i, i + 90);
-		const { results } = await env.DB.prepare(
-			`SELECT f.sha256, f.asset_id, (a.status = 'uploading' AND a.updated_at < ?) AS abandoned
-			 FROM asset_files f JOIN assets a ON a.id = f.asset_id
-			 WHERE f.role IN ('original','raw','live_video') AND f.sha256 IN (${chunk.map(() => "?").join(",")})`,
-		)
-			.bind(Date.now() - UPLOAD_ABANDONED_MS, ...chunk)
-			.all<{ sha256: string; asset_id: string; abandoned: number }>();
-		for (const r of results) {
+		const marks = chunk.map(() => "?").join(",");
+		const cutoff = Date.now() - UPLOAD_ABANDONED_MS;
+		type Row = { sha256: string; asset_id: string; abandoned: number };
+		const [current, source] = await env.DB.batch<Row>([
+			env.DB.prepare(
+				`SELECT f.sha256, f.asset_id, (a.status = 'uploading' AND a.updated_at < ?) AS abandoned
+				 FROM asset_files f JOIN assets a ON a.id = f.asset_id
+				 WHERE f.role IN ('original','raw','live_video') AND f.sha256 IN (${marks})`,
+			).bind(cutoff, ...chunk),
+			// 压缩过的条目一定是处理完的，不会是中断的上传
+			env.DB.prepare(`SELECT source_sha256 AS sha256, asset_id, 0 AS abandoned FROM asset_files WHERE source_sha256 IN (${marks})`).bind(...chunk),
+		]);
+		for (const r of [...current!.results, ...source!.results]) {
 			if (r.abandoned) abandoned.add(r.asset_id);
 			else found.set(r.sha256, r.asset_id);
 		}

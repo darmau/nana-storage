@@ -3,10 +3,12 @@ import { t } from "../i18n";
 import { StorageMeter } from "../library/StorageMeter";
 import { IconArchive, IconHeart, IconTrash } from "../ui/icons";
 import { useDocumentTitle } from "../ui/title";
+import { ORGANIZE_ITEMS, OrganizeLink } from "./OrganizePages";
 
 /**
  * 资料库首页（移动端底部“资料库”标签的落点；桌面端这些入口在侧边栏里）。
- * 只放别处没有的入口（收藏、归档、回收站）：相册、文件夹有自己的标签，人物、重复照片在探索页里，不在这里重复。
+ * 只放别处没有的入口（收藏、归档、回收站）：相册、文件夹有自己的标签，人物在探索页里，不在这里重复。
+ * 整理（重复照片、相似照片、原图压缩）在移动端没有自己的标签，三个入口直接平铺在这里（桌面端在侧边栏的“整理”页）。
  */
 export function LibraryHome() {
 	useDocumentTitle(t.nav.library);
@@ -29,6 +31,14 @@ export function LibraryHome() {
 					{t.trash.title}
 				</Link>
 			</div>
+			<section className="space-y-3">
+				<h2 className="text-lg font-bold">{t.organize.title}</h2>
+				<div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+					{ORGANIZE_ITEMS.map((item) => (
+						<OrganizeLink key={item.to} item={item} />
+					))}
+				</div>
+			</section>
 			<StorageMeter className="border border-border bg-card" />
 		</div>
 	);
