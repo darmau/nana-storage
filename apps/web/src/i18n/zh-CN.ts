@@ -696,7 +696,7 @@ export const zhCN = {
 		} as Record<string, string>,
 		reasonDetails: {
 			"not-smaller": "原图本来就压得比较狠，按质量 90 重新编码省不到 15%。可以在上面选一个分辨率，把像素多的照片缩小。",
-			"extra-data": "主图后面带着 HDR 增益图、景深图或动态照片的视频，重新编码会丢掉它们，所以不压缩也不缩小。",
+			"extra-data": "主图后面带着 HDR 增益图、景深图或动态照片的视频，重新编码会丢掉它们，所以不压缩也不缩小。只带相机预览图的（比如尼康）不算，照常压缩。",
 			"not-jpeg": "无损、算术编码或 12 位的 JPEG，无法原样重新编码。",
 			colourspace: "CMYK 等不是灰度 / RGB 的 JPEG，重新编码可能改变颜色。",
 			"too-large": "单个文件超过 400 MB，处理时内存不够。",

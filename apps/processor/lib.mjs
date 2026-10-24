@@ -708,8 +708,64 @@ function spliceMeta(original, encoded, meta) {
 	return Buffer.concat([encoded.subarray(0, 2), ...meta, encoded.subarray(i)]);
 }
 
-/** 只是描述编码方式的段不搬：APP14（Adobe 的颜色变换标志，新编码由 libjpeg 决定）、MPF（指向附图，带附图的不压缩） */
-const keepSegment = (seg) => seg[1] !== 0xee && !(seg[1] === 0xe2 && seg.subarray(4, 8).toString("latin1") === "MPF\0");
+const isMpf = (seg) => seg[1] === 0xe2 && seg.subarray(4, 8).toString("latin1") === "MPF\0";
+
+/**
+ * 只是描述编码方式的段不搬：APP14（Adobe 的颜色变换标志，新编码由 libjpeg 决定）、
+ * MPF（指向附图；只有附图全是预览图时才会压缩，预览图随之丢掉，见 onlyPreviewsAfter）
+ */
+const keepSegment = (seg) => seg[1] !== 0xee && !isMpf(seg);
+
+/** MPF 里只是预览图的类型：Large Thumbnail（VGA / Full HD）。尼康等相机附在主图后面供机身回放，丢掉不损失任何东西 */
+const MPF_PREVIEW = new Set([0x010001, 0x010002]);
+
+/**
+ * 主图 EOI 之后的数据是不是全都是 MPF 声明的预览图（加上图之间的填充）。
+ * 任何一张附图不是预览图（HDR 增益图、视差图、全景帧……），或者有 MPF 没覆盖到的数据（动态照片的视频），
+ * 或者解析不了，都返回 false（照旧按 extra-data 跳过）。
+ */
+export function onlyPreviewsAfter(src, parsed) {
+	try {
+		const mpfs = parsed.meta.filter(isMpf);
+		if (mpfs.length !== 1) return false;
+		const seg = mpfs[0];
+		// MPF 的偏移量相对于段里 TIFF 头的位置
+		const t = seg.byteOffset - src.byteOffset + 8;
+		const le = src.toString("latin1", t, t + 2) === "II";
+		const u16 = (o) => (le ? src.readUInt16LE(o) : src.readUInt16BE(o));
+		const u32 = (o) => (le ? src.readUInt32LE(o) : src.readUInt32BE(o));
+		const ifd = t + u32(t + 4);
+		let list = null;
+		for (let k = 0, n = u16(ifd); k < n; k++) {
+			const e = ifd + 2 + k * 12;
+			if (u16(e) === 0xb002) list = { count: u32(e + 4) / 16, at: t + u32(e + 8) };
+		}
+		if (!list || !Number.isInteger(list.count) || list.count < 2) return false;
+		const ranges = [];
+		for (let j = 1; j < list.count; j++) {
+			const p = list.at + j * 16;
+			const attr = u32(p);
+			const size = u32(p + 4);
+			const start = t + u32(p + 8);
+			// 低 24 位是类型，24–26 位是格式（0 = JPEG）
+			if (!MPF_PREVIEW.has(attr & 0xffffff) || ((attr >>> 24) & 7) !== 0) return false;
+			if (start < parsed.end || start + size > src.length || src[start] !== 0xff || src[start + 1] !== SOI) return false;
+			// 预览图自己带 HDR 增益图的标记时也不丢（不应该出现，只是保险）
+			if (/hdrgm|GainMap/.test(src.toString("latin1", start, Math.min(start + size, start + 65536)))) return false;
+			ranges.push([start, start + size]);
+		}
+		ranges.sort((a, b) => a[0] - b[0]);
+		const padding = (from, to) => !src.subarray(from, to).some((b) => b !== 0 && b !== 0xff);
+		let at = parsed.end;
+		for (const [start, end] of ranges) {
+			if (start < at || !padding(at, start)) return false;
+			at = end;
+		}
+		return padding(at, src.length);
+	} catch {
+		return false;
+	}
+}
 
 /**
  * 缩小分辨率之后，把 EXIF 子 IFD 里的像素尺寸（PixelXDimension / PixelYDimension）改成新的。
@@ -773,7 +829,8 @@ async function vipsNumber(args) {
  * 不压缩时 outPath 为 null，skipped 是原因（Worker 记成“不值得压缩”，以后不再列出）：
  *   not-jpeg      不是 8 位 Huffman 编码的 JPEG（无损 / 算术编码 / 12 位）
  *   colourspace   不是 1 或 3 个通道（CMYK 之类）
- *   extra-data    主图后面还有数据（HDR 增益图、景深图、动态照片的视频……），重新编码会丢掉
+ *   extra-data    主图后面还有数据（HDR 增益图、景深图、动态照片的视频……），重新编码会丢掉。
+ *                 只有 MPF 预览图（尼康等相机的机身回放用图）的不算，照常压缩、丢掉预览图
  *   too-large     超过 maxBytes
  *   not-smaller   省不到 minSaving
  * 压缩后校验：能完整解码、尺寸和通道一样、关键元数据一样、缩小后和原图逐像素的平均差值不超过 maxDiff。
@@ -797,7 +854,8 @@ export async function compressTask(input, dir, { quality, minSaving, maxBytes, m
 	if (!sof || !PLAIN_SOF.has(sof.marker) || sof.precision !== 8) return skip("not-jpeg");
 	base = { ...base, width: sof.width, height: sof.height };
 	if (sof.components.length !== 1 && sof.components.length !== 3) return skip("colourspace");
-	if (src.subarray(parsed.end).some((b) => b !== 0 && b !== 0xff)) return skip("extra-data");
+	// 后面只有 MPF 预览图的照常压缩，预览图丢掉（MPF 段也不搬）
+	if (src.subarray(parsed.end).some((b) => b !== 0 && b !== 0xff) && !onlyPreviewsAfter(src, parsed)) return skip("extra-data");
 
 	onStep("encode");
 	const y = sof.components[0];

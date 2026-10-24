@@ -695,7 +695,7 @@ export const en: Messages = {
 		} as Record<string, string>,
 		reasonDetails: {
 			"not-smaller": "The original is already fairly compressed; re-encoding at quality 90 would save less than 15%. Choose a resolution above to scale down high-resolution photos.",
-			"extra-data": "An HDR gain map, depth map or motion-photo video follows the main image. Re-encoding would drop it, so these are neither compressed nor downscaled.",
+			"extra-data": "An HDR gain map, depth map or motion-photo video follows the main image. Re-encoding would drop it, so these are neither compressed nor downscaled. Photos that only carry camera preview images (Nikon, for example) are compressed as usual.",
 			"not-jpeg": "Lossless, arithmetic-coded or 12-bit JPEG that can't be re-encoded as is.",
 			colourspace: "CMYK or another non-greyscale / RGB JPEG; re-encoding could shift the colours.",
 			"too-large": "The file is over 400 MB, too large to process in memory.",
