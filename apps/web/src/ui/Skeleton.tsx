@@ -96,3 +96,25 @@ export function PeopleSkeleton({ count = 18 }: { count?: number }) {
 		</Skeleton>
 	);
 }
+
+/** 重复照片的分组卡片（和 DuplicatesPage 相同：一行缩略图 + 右下角两个按钮） */
+export function DuplicateGroupsSkeleton({ count = 3 }: { count?: number }) {
+	return (
+		<Skeleton className="space-y-3">
+			<div className={`h-4 w-56 ${bar}`} />
+			{Array.from({ length: count }, (_, i) => (
+				<div key={i} className="rounded-2xl border border-border bg-card p-3">
+					<div className="flex gap-2 overflow-hidden pb-1">
+						{Array.from({ length: 3 }, (_, j) => (
+							<div key={j} className="aspect-[4/3] h-28 shrink-0 rounded-xl bg-surface sm:h-36" />
+						))}
+					</div>
+					<div className="mt-2 flex justify-end gap-2">
+						<div className="h-9 w-24 rounded-full bg-surface" />
+						<div className="h-9 w-28 rounded-full bg-surface" />
+					</div>
+				</div>
+			))}
+		</Skeleton>
+	);
+}

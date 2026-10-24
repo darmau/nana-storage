@@ -9,6 +9,7 @@ import { LibraryList } from "../library/LibraryList";
 import { type DuplicateGroups, type ListSource, type SimilarResult, listQuery } from "../library/queries";
 import { thumbUrl } from "../timeline/types";
 import { confirmDialog } from "../ui/confirm";
+import { DuplicateGroupsSkeleton } from "../ui/Skeleton";
 import { IconDuplicate, IconInfo, IconTrash } from "../ui/icons";
 import type { AssetDetail } from "../viewer/types";
 import { DuplicateCompare } from "./DuplicateCompare";
@@ -172,6 +173,7 @@ export function DuplicatesPage() {
 					</span>
 				</p>
 				{query.error && <p className="text-danger">{errorText(query.error)}</p>}
+				{!data && !query.error && <DuplicateGroupsSkeleton />}
 				{trash.error && <p className="text-sm text-danger">{errorText(trash.error)}</p>}
 				{ignore.error && <p className="text-sm text-danger">{errorText(ignore.error)}</p>}
 				{trash.data !== undefined && <p className="text-sm text-muted">{t.duplicates.trashed(trash.data)}</p>}

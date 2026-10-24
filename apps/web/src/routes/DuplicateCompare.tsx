@@ -157,6 +157,10 @@ export function DuplicateCompare({
 		strip.current?.querySelector("[data-current]")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 	}, [index]);
 
+	// 预览还没下载完的那张先垫放大的缩略图（列表里已经加载过，直接命中缓存），不露出黑屏
+	const [loaded, setLoaded] = useState<ReadonlySet<string>>(() => new Set());
+	const markLoaded = (id: string) => setLoaded((s) => (s.has(id) ? s : new Set(s).add(id)));
+
 	const near = (i: number) => {
 		const d = Math.abs(i - index);
 		return Math.min(d, n - d) <= PRELOAD;
@@ -211,6 +215,19 @@ export function DuplicateCompare({
 				onPointerUp={onPointerUp}
 				onPointerMove={(e) => zoom && e.pointerType === "mouse" && setZoom(pointAt(e))}
 			>
+				{!loaded.has(it[0]) && (
+					<img
+						key={`thumb-${it[0]}`}
+						src={thumbUrl(it[0], it[7])}
+						alt=""
+						draggable={false}
+						className="absolute inset-0 h-full w-full object-contain blur-sm"
+						style={{
+							transform: zoom ? `scale(${ZOOM})` : undefined,
+							transformOrigin: zoom ? `${zoom.x}% ${zoom.y}%` : undefined,
+						}}
+					/>
+				)}
 				{items.map((x, i) =>
 					near(i) ? (
 						<img
@@ -218,6 +235,7 @@ export function DuplicateCompare({
 							src={previewUrl(x[0], x[7])}
 							alt=""
 							draggable={false}
+							onLoad={() => markLoaded(x[0])}
 							className="absolute inset-0 h-full w-full object-contain"
 							style={{
 								visibility: i === index ? "visible" : "hidden",
