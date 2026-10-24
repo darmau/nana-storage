@@ -18,6 +18,7 @@ import { guardStub } from "./guard";
 import { createJob } from "./jobs";
 import { applyMaskToFaces } from "./people";
 import { deleteAssetsPermanently } from "./purge";
+import { searchSource, updateSearchDescription } from "./search";
 import { ITEM_COLUMNS, type TimelineItem, toItem } from "./timeline";
 import { UPLOAD_ABANDONED_MS } from "./uploads";
 import { ulid } from "./ulid";
@@ -806,7 +807,7 @@ library.patch("/assets/:id", async (c) => {
 
 	const stmts = [env.DB.prepare(`UPDATE assets SET ${sets.join(", ")} WHERE id = ?`).bind(...binds, id)];
 	if (description !== undefined) {
-		stmts.push(env.DB.prepare("UPDATE assets_fts SET description = ? WHERE asset_id = ?").bind(description ?? "", id));
+		stmts.push(updateSearchDescription(env, id, description ?? ""));
 	}
 	await env.DB.batch(stmts);
 	// 打码盖住的脸马上移出人物（不等新图生成）
@@ -887,7 +888,6 @@ const SearchQuery = z.object({
 	offset: z.string().optional(),
 });
 
-const likeEscape = (s: string) => `%${s.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
 
 /**
  * GET /api/search：文件名 + 描述全文搜索，可按日期、类型、收藏、相机、照片类型（连拍、全景、长曝光、人像、RAW）筛选。
@@ -900,10 +900,9 @@ library.get("/search", async (c) => {
 	// 有查询词时从全文索引的结果出发、按主键读（CROSS JOIN 固定连接顺序）；写成 a.id IN (...) 时规划器会扫完整个资料库再逐张比对
 	let from = "assets a";
 	if (p.q) {
-		from = "(SELECT DISTINCT asset_id FROM assets_fts WHERE " +
-			([...p.q].length >= 3 ? "assets_fts MATCH ?" : "names LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\'") +
-			") s CROSS JOIN assets a ON a.id = s.asset_id";
-		binds.push(...([...p.q].length >= 3 ? [`"${p.q.replace(/"/g, '""')}"`] : [likeEscape(p.q), likeEscape(p.q)]));
+		const source = searchSource(p.q);
+		from = `${source.sql} CROSS JOIN assets a ON a.id = s.asset_id`;
+		binds.push(...source.binds);
 	}
 	if (p.from) {
 		where.push("a.local_day >= ?");

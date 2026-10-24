@@ -627,7 +627,7 @@ export const en: Messages = {
 			"Photos that look exactly the same are listed here: resized, recompressed, converted or slightly cropped copies. The recommended one to keep is chosen by favorite, RAW, resolution, then file size. Photos from the same burst or taken at different times don't count as duplicates. Open a group to compare one by one; mark ones that actually differ as “Not duplicates” and they won't appear again.",
 		trashed: (n: number) => `Moved ${count(n, "photo", "photos")} to Trash.`,
 		scanned: (groups: number, scanned: number, truncated: boolean) =>
-			`${count(groups, "group", "groups")}, checked ${count(scanned, "fingerprinted photo", "fingerprinted photos")}${truncated ? " (too many photos, only some were checked)" : ""}.`,
+			`${count(groups, "group", "groups")}, checked ${count(scanned, "photo", "photos")}${truncated ? " (too many photos, only some were checked)" : ""}.`,
 		none: "No duplicate photos found.",
 		compareKeep: "Compare (recommended to keep)",
 		compare: "Compare",

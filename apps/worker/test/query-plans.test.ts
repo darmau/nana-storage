@@ -1,5 +1,8 @@
 import { SELF, env } from "cloudflare:test";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { FP_MODEL_VER } from "@nana/shared";
+import { deleteSearchRows, replaceSearchRow, searchSource, updateSearchDescription } from "../src/search";
+import { refreshSmartSet } from "../src/similar";
 import { authHeaders, mockAccessJwks } from "./helpers";
 
 /**
@@ -38,6 +41,30 @@ async function capture(path: string): Promise<{ sql: string; binds: unknown[] }[
 	await res.arrayBuffer();
 	vi.restoreAllMocks();
 	mockAccessJwks();
+	return seen;
+}
+
+/** 直接调用（不经过接口的后台代码，比如 Cron、队列消费者里的写入），返回期间准备过的 SQL 和参数。 */
+async function captureDirect(run: () => unknown): Promise<{ sql: string; binds: unknown[] }[]> {
+	const seen: { sql: string; binds: unknown[] }[] = [];
+	const prepare = env.DB.prepare.bind(env.DB);
+	vi.spyOn(env.DB, "prepare").mockImplementation((sql: string) => {
+		const stmt = prepare(sql);
+		const entry = { sql, binds: [] as unknown[] };
+		seen.push(entry);
+		const bind = stmt.bind.bind(stmt);
+		stmt.bind = (...values: unknown[]) => {
+			entry.binds = values;
+			return bind(...values);
+		};
+		return stmt;
+	});
+	try {
+		await run();
+	} finally {
+		vi.restoreAllMocks();
+		mockAccessJwks();
+	}
 	return seen;
 }
 
@@ -189,6 +216,52 @@ for (const stats of [false, true]) describe(`list query plans ${stats ? "with sk
 				expect(p, p).toMatch(/assets_size/);
 				expect(p, p).not.toMatch(/TEMP B-TREE/);
 			}
+		}
+	});
+
+	// FTS5 的非全文列没有索引：按条目 id 过滤 FTS 表本身会扫描整个索引（线上每处理一张照片读 24 万行），只能按 rowid 定位
+	it("full-text index writes locate rows by rowid", async () => {
+		const stmts = await captureDirect(() => [
+			...replaceSearchRow(env, ID(1), "IMG_1.JPG"),
+			updateSearchDescription(env, ID(1), "x"),
+			...deleteSearchRows(env, [ID(1), ID(2)]),
+		]);
+		expect(stmts.length).toBe(6);
+		for (const stmt of stmts) {
+			const p = await plan(stmt.sql, stmt.binds);
+			expect(p, `${stmt.sql}\n${p}`).not.toMatch(/VIRTUAL TABLE INDEX 0:( |$)/);
+			expect(p, p).not.toMatch(/SCAN (asset_search_ids|assets)\b(?! USING)/);
+		}
+		for (const q of ["abc", "ab"]) {
+			const p = await plan(`SELECT * FROM ${searchSource(q).sql}`, searchSource(q).binds);
+			expect(p, p).toMatch(/SEARCH i USING INTEGER PRIMARY KEY/);
+		}
+	});
+
+	// 主题更新：全库扫描按 asset_fp 的主键分页、背景样本按 rowid 读几段，每页只读这一页的行。
+	// 规划器自己选时会顺着 assets_timeline 读完整个资料库再排序，每页都读一遍全库（线上每页约 50 万行）
+	it("smart set refresh reads asset_fp page by page", async () => {
+		await env.DB.batch([
+			...Array.from({ length: 20 }, (_, i) =>
+				env.DB.prepare(
+					`INSERT OR IGNORE INTO asset_fp (asset_id, model, phash, b0, b1, b2, b3, b4, embedding, indexed, updated_at)
+					 VALUES (?, ?, '0000000000000000', 0, 0, 0, 0, 0, randomblob(512), 1, 0)`,
+				).bind(ID(i + 1), FP_MODEL_VER),
+			),
+			env.DB.prepare("INSERT OR IGNORE INTO smart_sets (id, name, created_at, updated_at) VALUES ('QPSET000000000000000000000', 'qp', 0, 0)"),
+			env.DB.prepare(
+				"INSERT OR IGNORE INTO smart_set_examples (set_id, asset_id, label, created_at) VALUES ('QPSET000000000000000000000', ?, 1, 0)",
+			).bind(ID(1)),
+		]);
+		const stmts = (await captureDirect(() => refreshSmartSet(env, "QPSET000000000000000000000"))).filter((s) =>
+			s.sql.includes("FROM asset_fp f"),
+		);
+		expect(stmts.some((s) => s.sql.includes("f.asset_id > ?")), "scan query not found").toBe(true);
+		expect(stmts.some((s) => s.sql.includes("f.rowid >= ?")), "background query not found").toBe(true);
+		for (const stmt of stmts) {
+			const p = await plan(stmt.sql, stmt.binds);
+			expect(p, p).not.toMatch(/assets_timeline/);
+			expect(p, p).not.toMatch(/TEMP B-TREE/);
 		}
 	});
 

@@ -116,7 +116,7 @@
   - 打码盖住的脸（人脸框被盖住 `MASK_FACE_COVER` 以上，`maskCoverage()`）：`faces.masked = 1`，移出人物、`state = 3`、删掉向量，信息面板不列出，不能手动指定（`applyMaskToFaces()`，PATCH 时立即生效；扫描时 `saveFaces` 也会判断）。去掉打码后改回待识别，由每小时的 Cron 补写向量、重新归入（原来手动指定的人物不保留）。
 - `assets.preview_edge` 记录预览生成时的长边，查看器据此判断是否需要叠加原图、是否已经是最高清。改大 `PREVIEW_LONG_EDGE` 后旧照片不会自动重做。
 - 派生文件只有在实际文件属于 URL 里的版本时才标记为 immutable（旋转后新图生成之前，新版本号对应的仍是旧图）。
-- 搜索 `GET /api/search`：FTS5 trigram，查询词 ≥3 个字符走索引，1–2 个字符退回 LIKE（已转义 `%` 和 `_`）；查询词整体作为短语传给 MATCH，避免 FTS 语法注入。
+- 搜索 `GET /api/search`：FTS5 trigram，查询词 ≥3 个字符走索引，1–2 个字符退回 LIKE（已转义 `%` 和 `_`）；查询词整体作为短语传给 MATCH，避免 FTS 语法注入。索引表是 `asset_search`（迁移 0026），它的 rowid 是 `asset_search_ids.id`。读写都经过 `src/search.ts`，删改一律按 rowid 定位。不要按条目 id 过滤 FTS 表本身：FTS5 的非全文列没有索引，每次都会扫描整个索引。旧表 `assets_fts` 正是这样，处理每张照片都读一遍全库，曾经占 D1 读取的约九成。旧表这一版只是保留，不再读写，下一个版本删除。
 - 界面测试：`node scripts/perf/metadata-ui.mjs <截图目录>`（可以重复运行）。
 
 ## 地图

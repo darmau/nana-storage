@@ -3,6 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { guardStub } from "../src/guard";
 import { handleJobMessage, handlers } from "../src/jobs";
 import { processAsset, type ProcessorLike, rotateAsset } from "../src/process";
+import { replaceSearchRow } from "../src/search";
 import { authHeaders, mockAccessJwks } from "./helpers";
 
 beforeAll(() => mockAccessJwks());
@@ -18,7 +19,7 @@ async function seed(n: number, o: { kind?: string; name?: string; camera?: strin
 		env.DB.prepare(
 			"INSERT INTO asset_files (id, asset_id, role, r2_key, mime, size, sha256, original_name, created_at) VALUES (?, ?, 'original', ?, 'image/jpeg', 100, ?, ?, 0)",
 		).bind(`MF${n}`, ID(n), `o/${ID(n)}/MF${n}`, String(n).padStart(64, "0"), o.name ?? `IMG_${n}.JPG`),
-		env.DB.prepare("INSERT INTO assets_fts (asset_id, names, description) VALUES (?, ?, '')").bind(ID(n), o.name ?? `IMG_${n}.JPG`),
+		...replaceSearchRow(env, ID(n), o.name ?? `IMG_${n}.JPG`),
 	]);
 }
 async function call<T = any>(method: string, path: string, body?: unknown): Promise<{ status: number; json: T }> {
@@ -37,7 +38,8 @@ beforeEach(async () => {
 	await env.DB.batch([
 		env.DB.prepare("DELETE FROM jobs"),
 		env.DB.prepare("DELETE FROM asset_files"),
-		env.DB.prepare("DELETE FROM assets_fts"),
+		env.DB.prepare("DELETE FROM asset_search"),
+		env.DB.prepare("DELETE FROM asset_search_ids"),
 		env.DB.prepare("DELETE FROM assets"),
 	]);
 	await guardStub(env).reset();

@@ -1,6 +1,7 @@
 import { PURGE_BATCH, TRASH_RETENTION_MS } from "@nana/shared";
 import { DERIVED_FILES, derivedKey } from "./derived";
 import { deleteFaceVectors } from "./people";
+import { deleteSearchRows } from "./search";
 import { deleteVectors } from "./similar";
 
 /**
@@ -39,7 +40,7 @@ export async function deleteAssetsPermanently(env: Env, ids: string[]): Promise<
 		await deleteVectors(env, chunk);
 		await deleteFaceVectors(env, faces.map((f) => f.id));
 		await env.DB.batch([
-			env.DB.prepare(`DELETE FROM assets_fts WHERE asset_id IN (${marks})`).bind(...chunk),
+			...deleteSearchRows(env, chunk),
 			env.DB.prepare(`DELETE FROM assets WHERE id IN (${marks})`).bind(...chunk),
 		]);
 		deleted += assets.length;

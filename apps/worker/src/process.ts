@@ -12,6 +12,7 @@ import { parseMeta, type Meta } from "./exif";
 import { handlers, type RunningJob } from "./jobs";
 import { type DeriveOutput, processorStub } from "./processor";
 import { saveFaces } from "./people";
+import { deleteSearchRows, replaceSearchRow } from "./search";
 import { deleteVectors, saveFingerprint } from "./similar";
 import { ulid } from "./ulid";
 
@@ -215,10 +216,7 @@ export async function processAsset(
 			parsed.burstUuid,
 			traits,
 		),
-		env.DB.prepare("DELETE FROM assets_fts WHERE asset_id = ?").bind(asset.id),
-		env.DB.prepare(
-			"INSERT INTO assets_fts (asset_id, names, description) SELECT ?, ?, COALESCE(description, '') FROM assets WHERE id = ?",
-		).bind(asset.id, names, asset.id),
+		...replaceSearchRow(env, asset.id, names),
 	]);
 
 	if (!parsed.burstUuid && asset.kind === "photo") await groupBurst(env, asset.id);
@@ -358,7 +356,7 @@ async function mergeLivePhoto(env: Env, asset: AssetRow, cid: string): Promise<b
 		env.DB.prepare(
 			"UPDATE assets SET kind = 'live', duration_ms = COALESCE(duration_ms, ?), updated_at = ? WHERE id = ?",
 		).bind(duration, Date.now(), photoId),
-		env.DB.prepare("DELETE FROM assets_fts WHERE asset_id = ?").bind(videoId),
+		...deleteSearchRows(env, [videoId]),
 		env.DB.prepare("DELETE FROM assets WHERE id = ?").bind(videoId),
 	]);
 	if (derived.length) await env.PHOTOS.delete(derived.map((r) => r.r2_key));

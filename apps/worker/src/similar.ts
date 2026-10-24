@@ -646,7 +646,7 @@ export async function rebuildDuplicatePairs(env: Env): Promise<{ truncated: bool
 /**
  * GET /api/duplicates：所有重复组（每组至少 2 张），按组里最新的拍摄时间倒序，每页 200 组。
  * 只读候选对（duplicate_pairs，两张都可见、没被标记为“不是重复”的），再按连拍和拍摄时间过滤、并查集分组，
- * 读取量和候选对的数量成正比，和照片总数无关（CROSS JOIN 固定从候选对出发，否则规划器会扫完整个资料库；另有一条 COUNT 显示检查了多少张）。
+ * 读取量和候选对的数量成正比，和照片总数无关（CROSS JOIN 固定从候选对出发，否则规划器会扫完整个资料库；检查了多少张读 storage_totals）。
  * 部署前的指纹还没有候选对时，先全量补建一次（rebuildDuplicatePairs）。只由用户打开“整理重复”页面触发。
  * 推荐保留哪一张要用的列（尺寸、文件大小 …）只给当前页的照片查。
  */
@@ -666,7 +666,8 @@ similar.get("/duplicates", async (c) => {
 			   AND NOT EXISTS (SELECT 1 FROM duplicate_ignores i WHERE i.a = p.a AND i.b = p.b)
 			 LIMIT ?`,
 		).bind(DUPLICATE_PAIR_MAX),
-		c.env.DB.prepare(`SELECT COUNT(*) AS n FROM asset_fp f JOIN assets a ON a.id = f.asset_id WHERE ${VISIBLE}`),
+		// 检查了多少张：读 storage_totals 那一行（触发器维护的可见照片 + 视频数），不数 asset_fp（每次打开都要读全库）
+		c.env.DB.prepare("SELECT photos + videos AS n FROM storage_totals WHERE id = 1"),
 	]);
 	const pairRows = pairRes!.results as PairResult[];
 	const rows: ScanRow[] = [];
@@ -698,7 +699,7 @@ similar.get("/duplicates", async (c) => {
 		}),
 		total: groups.length,
 		next: offset + GROUP_PAGE < groups.length ? offset + GROUP_PAGE : null,
-		scanned: (countRes!.results[0] as { n: number }).n,
+		scanned: (countRes!.results[0] as { n: number } | undefined)?.n ?? 0,
 		// 补建时被截断的部分由补查相似照片（scanSimilar）逐张补上，查完就不再是“只检查了一部分”
 		truncated: (truncated && (await similarPending(c.env)) > 0) || pairRows.length >= DUPLICATE_PAIR_MAX,
 	});
@@ -860,7 +861,8 @@ async function backgroundSample(env: Env, exclude: Set<string>): Promise<Float32
 	const per = Math.ceil(SMART_SET_BACKGROUND / BACKGROUND_RUNS);
 	const stmts = Array.from({ length: BACKGROUND_RUNS }, () =>
 		env.DB.prepare(
-			`SELECT f.asset_id, f.embedding FROM asset_fp f JOIN assets a ON a.id = f.asset_id
+			// CROSS JOIN 固定从 asset_fp 的 rowid 出发：规划器自己选时会顺着 assets_timeline 读完整个资料库再排序（每段 50 多万行）
+			`SELECT f.asset_id, f.embedding FROM asset_fp f CROSS JOIN assets a ON a.id = f.asset_id
 			 WHERE f.rowid >= ? AND f.model = ? AND ${VISIBLE} ORDER BY f.rowid LIMIT ?`,
 		).bind(Math.floor(Math.random() * max.m!), FP_MODEL_VER, per),
 	);
@@ -962,7 +964,9 @@ export async function refreshSmartSet(env: Env, setId: string): Promise<{ sugges
 		let after = "";
 		while (model) {
 			const { results } = await env.DB.prepare(
-				`SELECT f.asset_id, f.embedding FROM asset_fp f JOIN assets a ON a.id = f.asset_id
+				// CROSS JOIN 固定按 asset_fp 的主键往后读一页：规划器自己选时会顺着 assets_timeline 读完整个资料库再排序，
+				// 每页都读一遍全库，一次更新是平方级（线上每页约 50 万行）
+				`SELECT f.asset_id, f.embedding FROM asset_fp f CROSS JOIN assets a ON a.id = f.asset_id
 				 WHERE f.model = ? AND f.asset_id > ? AND ${VISIBLE}${scope === null ? "" : IN_SCOPE("?")} ORDER BY f.asset_id LIMIT ?`,
 			)
 				.bind(FP_MODEL_VER, after, ...(scope === null ? [] : [scope]), SMART_SET_SCAN_PAGE)

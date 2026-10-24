@@ -629,7 +629,7 @@ export const zhCN = {
 			"这里列出看起来完全一样的照片：缩小、重新压缩、换了格式或轻微裁剪过的副本。推荐保留的一张依次按收藏、有 RAW、分辨率、文件大小挑选； 同一组连拍、拍摄时间不同的不算重复。点开一组可以逐张对比，其实不一样的标记为“不是重复”后就不再出现。",
 		trashed: (n: number) => `已把 ${n} 张移到回收站。`,
 		scanned: (groups: number, scanned: number, truncated: boolean) =>
-			`${groups} 组，检查了 ${fmtNumber(scanned)} 张有指纹的照片${truncated ? "（照片太多，只检查了一部分）" : ""}。`,
+			`${groups} 组，检查了 ${fmtNumber(scanned)} 张照片${truncated ? "（照片太多，只检查了一部分）" : ""}。`,
 		none: "没有发现重复的照片。",
 		compareKeep: "对比（推荐保留）",
 		compare: "对比",
