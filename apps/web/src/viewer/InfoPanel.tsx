@@ -5,8 +5,6 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import { t } from "../i18n";
 import { invalidateLibrary } from "../library/actions";
-import { similarQuery } from "../library/queries";
-import { thumbUrl } from "../timeline/types";
 import { formatBytes, formatDuration, formatTakenAt } from "../timeline/format";
 import { downloadUrl } from "./media";
 import { type AssetFace, assetFacesQuery, FaceAvatar, invalidatePeople, personName, renamePerson } from "../people/model";
@@ -172,8 +170,6 @@ export function InfoPanel({ asset, onClose }: { asset: AssetDetail; onClose: () 
 			</dl>
 			{error && <p className="mt-3 text-xs text-danger">{t.info.saveFailed(error)}</p>}
 
-			<SimilarStrip assetId={asset.id} />
-
 			<h3 className="mb-1 mt-6 text-xs font-semibold text-muted">{t.info.files}</h3>
 			<ul>
 				{sources.map((f) => (
@@ -291,46 +287,6 @@ function PeopleStrip({ assetId }: { assetId: string }) {
 						);
 					}}
 				/>
-			)}
-		</section>
-	);
-}
-
-/** 最多显示几张相似照片，其余点“全部”。 */
-const SIMILAR_PREVIEW = 8;
-
-/** 相似照片：只在信息面板打开时请求一次（缓存 1 分钟）。点开进入相似照片页。 */
-function SimilarStrip({ assetId }: { assetId: string }) {
-	const { data } = useQuery(similarQuery(assetId));
-	if (!data || data.unavailable || (data.fingerprinted && !data.items.length)) return null;
-	return (
-		<section>
-			<h3 className="mb-2 mt-6 flex items-center justify-between text-xs font-semibold text-muted">
-				{t.info.similar}
-				{data.items.length > SIMILAR_PREVIEW && (
-					<Link to="/similar/$assetId" params={{ assetId }} className={small}>
-						{t.info.similarAll(data.items.length)}
-					</Link>
-				)}
-			</h3>
-			{!data.fingerprinted ? (
-				<p className="text-xs text-muted">{t.info.noFingerprint}</p>
-			) : (
-				<ul className="grid grid-cols-4 gap-1.5">
-					{data.items.slice(0, SIMILAR_PREVIEW).map((it) => (
-						<li key={it[0]}>
-							<Link
-								to="/similar/$assetId"
-								params={{ assetId }}
-								search={{ a: it[0] }}
-								className="block aspect-square overflow-hidden rounded-lg bg-surface"
-								aria-label={t.info.openSimilar}
-							>
-								<img src={thumbUrl(it[0], it[7])} alt="" loading="lazy" className="h-full w-full object-cover" />
-							</Link>
-						</li>
-					))}
-				</ul>
 			)}
 		</section>
 	);

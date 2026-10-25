@@ -2,7 +2,6 @@ import { PURGE_BATCH, TRASH_RETENTION_MS } from "@nana/shared";
 import { DERIVED_FILES, derivedKey } from "./derived";
 import { deleteFaceVectors } from "./people";
 import { deleteSearchRows } from "./search";
-import { deleteVectors } from "./similar";
 
 /**
  * 永久删除条目：先删 R2 里的所有文件（包括人脸头像拼图）和 Vectorize 里的向量（照片的和人脸的），
@@ -37,7 +36,6 @@ export async function deleteAssetsPermanently(env: Env, ids: string[]): Promise<
 		}
 		const list = [...keys];
 		for (let j = 0; j < list.length; j += 1000) await env.PHOTOS.delete(list.slice(j, j + 1000));
-		await deleteVectors(env, chunk);
 		await deleteFaceVectors(env, faces.map((f) => f.id));
 		await env.DB.batch([
 			...deleteSearchRows(env, chunk),

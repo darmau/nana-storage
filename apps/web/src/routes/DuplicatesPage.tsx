@@ -1,64 +1,18 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { DUPLICATE_IGNORE_MAX } from "@nana/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorText } from "../api";
 import { t } from "../i18n";
 import { batch, ignoreDuplicates } from "../library/actions";
-import { LibraryList } from "../library/LibraryList";
-import { type DuplicateGroups, type ListSource, type SimilarResult, listQuery } from "../library/queries";
+import type { DuplicateGroups } from "../library/queries";
 import { thumbUrl } from "../timeline/types";
 import { confirmDialog } from "../ui/confirm";
 import { DuplicateGroupsSkeleton } from "../ui/Skeleton";
-import { IconDuplicate, IconInfo, IconTrash } from "../ui/icons";
-import type { AssetDetail } from "../viewer/types";
+import { IconDuplicate, IconTrash } from "../ui/icons";
 import { DuplicateCompare, comparePill } from "./DuplicateCompare";
 import { OrganizeTitle } from "./OrganizePages";
 import { useDocumentTitle } from "../ui/title";
-
-
-/** 还没有指纹时的说明（处理时指纹没算出来）。 */
-function FingerprintHint() {
-	return (
-		<p className="flex items-start gap-2.5 rounded-2xl bg-notice px-4 py-3 text-sm">
-			<IconInfo size={18} className="mt-0.5 shrink-0 text-muted" />
-			<span>{t.similar.hint}</span>
-		</p>
-	);
-}
-
-// ------------------------------------------------------------------ 相似照片（查看器信息面板的“全部”）
-
-export function SimilarPage() {
-	useDocumentTitle(t.similar.title);
-	const { assetId } = useParams({ strict: false }) as { assetId: string };
-	const source: ListSource = { key: ["similar-list", assetId], path: `/assets/${assetId}/similar` };
-	// 和网格共用同一个查询，只为了读出 fingerprinted / unavailable
-	const query = useInfiniteQuery(listQuery(source));
-	const first = query.data?.pages[0] as SimilarResult | undefined;
-	// 和查看器共用缓存
-	const detail = useQuery({ queryKey: ["asset", assetId], queryFn: () => api<AssetDetail>(`/assets/${assetId}`) });
-	return (
-		<div className="space-y-6">
-			<div className="flex items-center gap-3 pt-1">
-				{detail.data && (
-					<img src={thumbUrl(assetId, detail.data.derived_rev)} alt="" className="h-12 w-12 shrink-0 rounded-xl bg-surface object-cover" />
-				)}
-				<h1 className="page-title">{t.similar.title}</h1>
-			</div>
-			{first && !first.fingerprinted && <FingerprintHint />}
-			<LibraryList
-				key={assetId}
-				source={source}
-				context={{ kind: "library" }}
-				groupByDay={false}
-				empty={first?.unavailable ? t.similar.unavailable : t.similar.none}
-			/>
-		</div>
-	);
-}
-
-// ------------------------------------------------------------------ 重复照片
 
 /** 撤销条显示多久 */
 const UNDO_MS = 8000;

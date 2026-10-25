@@ -112,7 +112,7 @@ describe("usage stats", () => {
 		expect(await env.DB.prepare("SELECT bytes, photos, videos FROM storage_totals").first()).toEqual({ bytes: 10, photos: 1, videos: 0 });
 	});
 
-	it("includes incomplete uploads and indexed vectors", async () => {
+	it("includes incomplete uploads and indexed face vectors", async () => {
 		await asset("U1", { status: "uploading", files: [] });
 		await env.DB.prepare(
 			`INSERT INTO uploads (id, asset_id, file_id, role, r2_key, r2_upload_id, mime, size, sha256, created_at)
@@ -120,7 +120,8 @@ describe("usage stats", () => {
 		).run();
 		await asset("V1", { files: [["original", 1]] });
 		await env.DB.prepare(
-			"INSERT INTO asset_fp (asset_id, model, phash, b0, b1, b2, b3, b4, embedding, indexed, updated_at) VALUES ('V1', 'm', '0', 0, 0, 0, 0, 0, x'00', 1, 0)",
+			`INSERT INTO faces (id, asset_id, idx, x, y, w, h, px, score, sharpness, embedding, indexed, created_at)
+			 VALUES ('F1', 'V1', 0, 0, 0, 0.1, 0.1, 100, 0.9, 1, x'00', 1, 0), ('F2', 'V1', 1, 0, 0, 0.1, 0.1, 100, 0.9, 1, x'00', 0, 0)`,
 		).run();
 		const s = await usageStats(env, now);
 		expect(s.storage.uploads).toEqual({ files: 1, bytes: 12345 });

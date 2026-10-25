@@ -195,7 +195,6 @@ for (const stats of [false, true]) describe(`list query plans ${stats ? "with sk
 		["/search?q=abc&favorite=1", /LIMIT \? OFFSET \?$/],
 		["/people", /COUNT\(DISTINCT f.asset_id\)/],
 		["/duplicates", /FROM duplicate_pairs p/],
-		["/similar-groups", /INDEXED BY asset_fp_similar_queue/],
 	];
 	for (const [path, match] of others) {
 		it(`${path} does not scan the whole library`, async () => {
@@ -278,8 +277,8 @@ for (const stats of [false, true]) describe(`list query plans ${stats ? "with sk
 		await env.DB.batch([
 			...Array.from({ length: 20 }, (_, i) =>
 				env.DB.prepare(
-					`INSERT OR IGNORE INTO asset_fp (asset_id, model, phash, b0, b1, b2, b3, b4, embedding, indexed, updated_at)
-					 VALUES (?, ?, '0000000000000000', 0, 0, 0, 0, 0, randomblob(512), 1, 0)`,
+					`INSERT OR IGNORE INTO asset_fp (asset_id, model, phash, b0, b1, b2, b3, b4, embedding, updated_at)
+					 VALUES (?, ?, '0000000000000000', 0, 0, 0, 0, 0, randomblob(512), 0)`,
 				).bind(ID(i + 1), FP_MODEL_VER),
 			),
 			env.DB.prepare("INSERT OR IGNORE INTO smart_sets (id, name, created_at, updated_at) VALUES ('QPSET000000000000000000000', 'qp', 0, 0)"),

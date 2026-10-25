@@ -373,10 +373,6 @@ export const zhCN = {
 		changePerson: "改成其他人…",
 		whoMenu: "这是谁…",
 		notPerson: (name: string) => `这不是“${name}”`,
-		similar: "相似照片",
-		similarAll: (n: number) => `全部 ${n}`,
-		noFingerprint: "这张照片还没有指纹。",
-		openSimilar: "打开相似照片",
 	},
 	people: {
 		title: "人物",
@@ -614,12 +610,6 @@ export const zhCN = {
 		emptyResults: "暂时没有结果。可以试试更宽松的灵敏度。",
 	},
 
-	similar: {
-		title: "相似照片",
-		hint: "相似度按照片的“指纹”计算，指纹在照片处理时生成。这张照片还没有指纹。",
-		unavailable: "相似索引暂时不可用。",
-		none: "没有找到相似的照片。",
-	},
 	duplicates: {
 		title: "重复照片",
 		trashTitle: (n: number) => `把 ${n} 张重复的照片移到回收站？`,
@@ -638,31 +628,10 @@ export const zhCN = {
 		keepRecommended: "只保留推荐的",
 		ignored: "已标记为不是重复",
 	},
-	lookalike: {
-		title: "相似照片",
-		dialog: "对比相似照片",
-		intro:
-			"这里列出看起来差不多的照片：同一张图的不同版本（缩放、裁切、加水印、截图），或者同一次拍摄里姿势、表情略有不同的几张。只看画面内容，不看拍摄时间；两张都认出了人物时，至少要有一个相同的人。推荐保留的一张依次按收藏、有 RAW、分辨率、文件大小挑选。拿不准的点“暂不处理”，这一组会排到最后，以后还会轮到。",
-		listed: (groups: number, more: boolean) => `已列出 ${fmtNumber(groups)} 组${more ? "，还有更多" : ""}。`,
-		loadMore: "加载更多",
-		scanning: (n: number) => `正在比较，还剩 ${fmtNumber(n)} 张…`,
-		waiting: (n: number) => `还有 ${fmtNumber(n)} 张刚处理完的照片没比较，稍后会自动比较。`,
-		unavailable: "相似索引暂时不可用，新照片不会被比较。",
-		none: "没有发现相似的照片。",
-		snooze: "暂不处理",
-		snoozedBefore: "暂不处理过",
-		archiveOthers: "其余归档",
-		trashOthers: "其余移到回收站",
-		keepThisTrash: "保留这张，其余移到回收站",
-		keepThisArchive: "保留这张，其余归档",
-		trashed: (n: number) => `已把 ${n} 张移到回收站`,
-		archived: (n: number) => `已归档 ${n} 张`,
-	},
 	organize: {
 		title: "整理",
-		intro: "清理重复和相似的照片，压缩体积特别大的原图，腾出存储空间。",
+		intro: "清理重复的照片，压缩体积特别大的原图，腾出存储空间。",
 		duplicatesSub: "找出内容几乎一样的照片，留一张",
-		lookalikeSub: "找出看起来差不多的照片，挑最好的一张",
 		compressSub: "把特别大的 JPEG 原图压小，画质几乎不变",
 	},
 	compress: {

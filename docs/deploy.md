@@ -24,7 +24,7 @@ pnpm run setup
 
 脚本（提示是英文的）会问域名和邮箱，然后：
 
-- 创建 D1（`nana-db`）、R2（`nana-photos`）、KV（`nana-kv`）、队列（`nana-jobs`、`nana-jobs-dlq`）、两个 Vectorize 索引（`nana-embed`、`nana-faces`，512 维 cosine）；已存在的跳过；
+- 创建 D1（`nana-db`）、R2（`nana-photos`）、KV（`nana-kv`）、队列（`nana-jobs`、`nana-jobs-dlq`）、Vectorize 索引 `nana-faces`（512 维 cosine）；已存在的跳过；
 - 执行 D1 迁移；
 - 用你临时提供的 API 令牌建 Zero Trust Access 应用：整个主机名、只放行你的邮箱、只用邮箱验证码（One-time PIN）登录、会话 24 小时，并打开 D1 读复制。令牌只在这次运行中使用，不保存，用完可以删掉。不想给令牌时可以手动建应用，再把团队域名和 AUD 填进去（步骤脚本会打印）；
 - 写入 Worker secret：`ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`、`OWNER_EMAIL`。
@@ -76,8 +76,7 @@ D1 读复制（可选，建议）：打开之后，API 的读查询会落到离�
 - [ ] 上传几张照片，在设置页看到任务完成，时间线里出现照片。
 - [ ] 设置页的“容器运行时长”有合理的增长；观察容器空闲后多久停止（本地是任务一结束就停）。
 - [ ] 地图页能显示底图和照片标记。
-- [ ] 新上传的照片在查看器信息面板里能看到相似照片，“探索 › 主题”和重复照片页正常。
-- [ ] 打开一张照片的信息面板，能看到“相似照片”；Workers 日志里没有 `vectorize_query_failed` / `vectorize_upsert_failed`。
+- [ ] “探索 › 主题”和重复照片页正常；Workers 日志里没有 `face_upsert_failed` / `face_recognize_failed`。
 
 ## 更新
 

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { JOB_STALE_MS, MAX_MONTHLY_BUDGET_USD, MIN_MONTHLY_BUDGET_USD, PROCESSOR_POOL_SIZE, SIMILAR_SCAN_CRON_BATCH, type JobMessage } from "@nana/shared";
+import { JOB_STALE_MS, MAX_MONTHLY_BUDGET_USD, MIN_MONTHLY_BUDGET_USD, PROCESSOR_POOL_SIZE, type JobMessage } from "@nana/shared";
 import { authenticate } from "./auth";
 import { compress } from "./compress";
 import { device } from "./device";
@@ -17,8 +17,7 @@ import { library } from "./library";
 import { computeLibraryStats } from "./library-stats";
 import { map } from "./map";
 import { people, recognizePendingFaces } from "./people";
-import { refreshStaleSmartSets, similar, syncVectors } from "./similar";
-import { scanSimilar, similarGroups } from "./similar-groups";
+import { refreshStaleSmartSets, similar } from "./similar";
 import { stats } from "./stats";
 import { timeline } from "./timeline";
 import { cleanupStaleUploads, uploads } from "./uploads";
@@ -74,7 +73,6 @@ api.route("/device", device);
 api.route("/compress", compress);
 api.route("/", library);
 api.route("/", similar);
-api.route("/", similarGroups);
 api.route("/", people);
 
 api.get("/assets/:id", async (c) => {
@@ -222,17 +220,14 @@ export default {
 	},
 
 	async scheduled(controller, env, ctx): Promise<void> {
-		// 每小时：补写 Vectorize（每次最多 VECTOR_SYNC_BATCH 条）、自动更新标记有变化的主题（每次最多 SMART_SET_CRON_BATCH 个）、
-		// 识别推迟的人脸（每次最多 FACE_CRON_BATCH 张）、设备端消失后补发它接管期间被 ack 掉的任务（每次最多 RESUME_BATCH 个）、
-		// 给新照片查相似照片（每次最多 SIMILAR_SCAN_CRON_BATCH 张），熔断时都跳过
+		// 每小时：自动更新标记有变化的主题（每次最多 SMART_SET_CRON_BATCH 个）、识别推迟的人脸（每次最多 FACE_CRON_BATCH 张）、
+		// 设备端消失后补发它接管期间被 ack 掉的任务（每次最多 RESUME_BATCH 个），熔断时都跳过
 		if (controller.cron === "7 * * * *")
 			ctx.waitUntil(
 				Promise.allSettled([
-					syncVectors(env),
 					refreshStaleSmartSets(env),
 					recognizePendingFaces(env),
 					requeueAfterDevice(env),
-					scanSimilar(env, SIMILAR_SCAN_CRON_BATCH),
 				]).then((rs) => {
 					for (const r of rs) if (r.status === "rejected") console.error(JSON.stringify({ event: "cron_failed", error: String(r.reason).slice(0, 300) }));
 				}),

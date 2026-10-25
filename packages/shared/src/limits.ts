@@ -136,7 +136,7 @@ export const PURGE_BATCH = 1000;
 export const TRASH_RETENTION_MS = 30 * 24 * 3600 * 1000;
 
 /**
- * 相同 / 相似照片（src/similar.ts）。
+ * 相同照片（src/similar.ts）。
  * 指纹在 process 任务的那 1 次 derive 里一起算出来，不增加容器调用。
  */
 export const FP_MODEL_VER = "clip-b32-q8"; // 和 apps/processor/lib.mjs 的 MODEL_VER 一致
@@ -167,46 +167,6 @@ export const DUPLICATE_NEIGHBOR_MAX = 1000;
  */
 export const DUPLICATE_SCAN_PAGE = 10_000;
 export const DUPLICATE_SCAN_MAX = 200_000;
-
-/** 相似照片：Vectorize 取前 SIMILAR_TOP_K 个，余弦相似度至少 SIMILAR_MIN_SCORE。 */
-export const SIMILAR_TOP_K = 30;
-export const SIMILAR_MIN_SCORE = 0.85;
-
-/**
- * “相似照片”整理（apps/worker/src/similar-groups.ts）：看起来差不多的照片，只按 CLIP 向量判断，不看拍摄时间。
- * 每张照片查一次 Vectorize（前 SIMILAR_GROUP_TOP_K 个），余弦达到 SIMILAR_GROUP_MIN_COSINE 的照片对存进 D1 的 similar_pairs。
- * 阈值是固定的（没有灵敏度可选）；改了它之后已经存下的照片对不会重算，要清空 similar_pairs 和 asset_fp.similar_at。
- */
-export const SIMILAR_GROUP_MIN_COSINE = 0.9;
-export const SIMILAR_GROUP_TOP_K = 20;
-/** 一组最多这么多张：以一张为中心，组里每一张都和它足够像，剩下的留给别的组。 */
-export const SIMILAR_GROUP_MAX = 50;
-/**
- * 打开页面时按队列逐页取组：每页最多 SIMILAR_GROUP_PAGE 组，最多看 SIMILAR_CENTER_SCAN_MAX 个候选中心
- * （每个中心读它自己的照片对），所以每次请求最多读几万行，和资料库大小无关。
- */
-export const SIMILAR_GROUP_PAGE = 30;
-export const SIMILAR_CENTER_SCAN_MAX = 1000;
-/**
- * 向量进 Vectorize 之后要过一会儿才能被查到。只查进索引超过这么久的照片，这样两张差不多同时处理的照片里，
- * 后查的那张一定能查到先进索引的那张（否则两边都可能错过对方）。
- */
-export const SIMILAR_SCAN_SETTLE_MS = 10 * 60_000;
-/**
- * 查近邻：每张 1 次 Vectorize 查询，D1 按批（每批几十张一次 batch）读写，同时补上这张照片的重复照片候选对。
- * 每张照片只查一次（指纹重写后再查一次）：
- *  - 每小时 Cron 最多 SIMILAR_SCAN_CRON_BATCH 张，熔断时跳过，不会自我触发。最坏每天 24 × 600 = 14400 次查询（约 740 万查询维度），
- *    只在有没查过的照片时才有（每张只查一次，总量只取决于照片数）。
- *  - 打开“相似照片”页面时，还有没查过的就由页面一批接一批地请求，每次 SIMILAR_SCAN_BATCH 张，每次打开最多 SIMILAR_SCAN_CALLS 次
- *    （120 万张）；切到后台暂停、回到前台继续；出错退避重试，连续 SIMILAR_SCAN_RETRIES 次失败才停。
- *  - 30 万张的库补完一次：约 1.5 亿查询维度（每月含 5000 万，超出约 $1）；D1 约 3000 万行读取、几百万行写入，都在每月的额度内。
- */
-export const SIMILAR_SCAN_CRON_BATCH = 600;
-export const SIMILAR_SCAN_BATCH = 300;
-export const SIMILAR_SCAN_CALLS = 4000;
-export const SIMILAR_SCAN_RETRIES = 6;
-/** 一次“暂不处理”最多涉及的照片数。 */
-export const SIMILAR_SNOOZE_MAX = 200;
 
 /**
  * 自定义主题：最多 SMART_SET_MAX 个，每个最多 SMART_SET_MAX_EXAMPLES 个样本（正 + 负）。
@@ -256,12 +216,6 @@ export const SMART_SET_REFRESH_LOCK_MS = 60_000;
  */
 export const SMART_SET_CRON_BATCH = 3;
 export const SMART_SET_CRON_QUIET_MS = 10 * 60_000;
-
-/**
- * Vectorize 补写：写入失败的（asset_fp.indexed = 0）由每小时的 Cron 补写，每次最多这么多条，不会自我触发。
- * 最坏情况每天 24 × 500 = 1.2 万次写入，Vectorize 按存储的维度计费，写入本身几乎不花钱。
- */
-export const VECTOR_SYNC_BATCH = 500;
 
 /**
  * 人物（人脸识别，src/people.ts）。

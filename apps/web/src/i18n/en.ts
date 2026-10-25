@@ -374,10 +374,6 @@ export const en: Messages = {
 		changePerson: "Change to someone else…",
 		whoMenu: "Who is this…",
 		notPerson: (name: string) => `Not “${name}”`,
-		similar: "Similar photos",
-		similarAll: (n: number) => `All ${fmtNumber(n)}`,
-		noFingerprint: "This photo has no fingerprint yet.",
-		openSimilar: "Open similar photo",
 	},
 	people: {
 		title: "People",
@@ -611,12 +607,6 @@ export const en: Messages = {
 		emptyResults: "No results yet. Try a looser sensitivity.",
 	},
 
-	similar: {
-		title: "Similar photos",
-		hint: "Similarity is based on each photo's “fingerprint”, computed when the photo is processed. This photo doesn't have one yet.",
-		unavailable: "The similarity index is unavailable right now.",
-		none: "No similar photos found.",
-	},
 	duplicates: {
 		title: "Duplicates",
 		trashTitle: (n: number) => `Move ${count(n, "duplicate photo", "duplicate photos")} to Trash?`,
@@ -636,31 +626,10 @@ export const en: Messages = {
 		keepRecommended: "Keep only recommended",
 		ignored: "Marked as not duplicates",
 	},
-	lookalike: {
-		title: "Similar photos",
-		dialog: "Compare similar photos",
-		intro:
-			"Photos that look alike: different versions of the same picture (resized, cropped, watermarked, screenshots) or shots from the same moment with a slightly different pose or expression. Only the picture itself counts, not when it was taken; when people are recognized in both, they must share at least one person. The one to keep is picked by favorite, RAW, resolution, then file size. Not sure? Choose “Later” and the group moves to the end of the queue to come back around.",
-		listed: (groups: number, more: boolean) => `Showing ${count(groups, "group", "groups")}${more ? ", more below" : ""}.`,
-		loadMore: "Load more",
-		scanning: (n: number) => `Comparing, ${fmtNumber(n)} left…`,
-		waiting: (n: number) => `${count(n, "newly processed photo hasn't", "newly processed photos haven't")} been compared yet; this happens automatically soon.`,
-		unavailable: "The similarity index is unavailable, so new photos won't be compared.",
-		none: "No similar photos found.",
-		snooze: "Later",
-		snoozedBefore: "Put off before",
-		archiveOthers: "Archive the rest",
-		trashOthers: "Move the rest to Trash",
-		keepThisTrash: "Keep this, trash the rest",
-		keepThisArchive: "Keep this, archive the rest",
-		trashed: (n: number) => `Moved ${count(n, "photo", "photos")} to Trash`,
-		archived: (n: number) => `Archived ${count(n, "photo", "photos")}`,
-	},
 	organize: {
 		title: "Clean up",
-		intro: "Remove duplicate and look-alike photos and shrink oversized originals to free up storage.",
+		intro: "Remove duplicate photos and shrink oversized originals to free up storage.",
 		duplicatesSub: "Find near-identical photos and keep one",
-		lookalikeSub: "Find photos that look alike and keep the best one",
 		compressSub: "Shrink very large JPEG originals with no visible loss",
 	},
 	compress: {

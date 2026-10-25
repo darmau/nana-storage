@@ -53,14 +53,9 @@
 			"bucket_name": "nana-photos"
 		}
 	],
-	// 相似照片的近邻索引（512 维，cosine）。只存 asset_id 和向量，不存任何元数据；真实数据在 D1 的 asset_fp，可以随时重建。
-	// 本地没有模拟：wrangler dev 时相似功能返回空（不连线上索引，也不要用 --remote）。
+	// 人脸向量（512 维，cosine），用来把同一个人的脸归到一起（src/people.ts）。只存 face_id 和向量，不存任何元数据；真实数据在 D1 的 faces，可以随时重建。
+	// 本地没有模拟：wrangler dev 时只记录人脸、不归入人物（不连线上索引，也不要用 --remote）。
 	"vectorize": [
-		{
-			"binding": "EMBED_INDEX",
-			"index_name": "nana-embed"
-		},
-		// 人脸向量（512 维，cosine），用来把同一个人的脸归到一起（src/people.ts）。同样只存 face_id 和向量，真实数据在 D1 的 faces。
 		{
 			"binding": "FACE_INDEX",
 			"index_name": "nana-faces"

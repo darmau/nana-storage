@@ -11,8 +11,6 @@ import {
 	DUPLICATE_SCAN_PAGE,
 	FP_DIMS,
 	FP_MODEL_VER,
-	SIMILAR_MIN_SCORE,
-	SIMILAR_TOP_K,
 	SMART_SET_BACKGROUND,
 	SMART_SET_CONFLICT,
 	SMART_SET_CRON_BATCH,
@@ -29,31 +27,25 @@ import {
 	SMART_SET_SUGGESTION_MAX,
 	type SmartSetLevel,
 	type SmartSetMetrics,
-	VECTOR_SYNC_BATCH,
 } from "@nana/shared";
 import { NO_STORE } from "./dbcache";
 import { guardStub } from "./guard";
 import { TypeParam, andType, page, typeCondition } from "./library";
 import type { Fingerprint } from "./processor";
 import { type Classifier, decodeClassifier, encodeClassifier, score, trainClassifier } from "./smartset-model";
-import { ITEM_COLUMNS, type ItemRow, type TimelineItem, toItem } from "./timeline";
+import { ITEM_COLUMNS, type ItemRow, toItem } from "./timeline";
 import { ulid } from "./ulid";
 
 /**
- * 相同 / 相似照片、自定义主题。
+ * 相同照片、自定义主题。
  *
  * 指纹由容器在 derive 时算好（apps/processor/lib.mjs）：
  *  - phash：64 位感知哈希。汉明距离 ≤ DUPLICATE_MAX_HAMMING、拍摄时间对得上、CLIP 向量也几乎一样，才算同一张图
  *    （缩放、重新压缩、换格式、轻微裁剪）。用户可以把一组标记为“不是重复”（duplicate_ignores）。
  *    候选对（duplicate_pairs）在写指纹时增量算好，打开“整理重复”时只读候选对，不扫描全库。
- *  - embedding：CLIP 图像向量（512 个 int8）。余弦相似度用于“相似照片”；主题在它上面训练分类器（src/smartset-model.ts）。
+ *  - embedding：CLIP 图像向量（512 个 int8）。复核重复照片；主题在它上面训练分类器（src/smartset-model.ts）。
  *
- * D1 的 asset_fp 是唯一真实数据；Vectorize（EMBED_INDEX）只是“相似照片”用的近邻索引，不放元数据（主题直接扫描 D1）：
- *  - 查询结果一律再用 D1 过滤（回收站、已删除、未就绪的去掉），所以索引里残留的向量不会泄露到界面上。
- *  - 写入失败不影响任务：asset_fp.indexed 保持 0，由每小时的 Cron 补写（syncVectors，每次最多 VECTOR_SYNC_BATCH 条）。
- *  - 本地开发没有 Vectorize：相关接口返回空结果，并带 unavailable: true。
- *
- * 成本：查询只由用户操作触发；没有轮询，没有新的队列消息来源。
+ * 都只存在 D1 的 asset_fp 里，不用 Vectorize。成本：查询只由用户操作触发；没有轮询，没有新的队列消息来源。
  */
 
 type Bindings = { Bindings: Env };
@@ -64,11 +56,6 @@ const VISIBLE = "a.deleted_at IS NULL AND a.status = 'ready'";
 const PAGE = 500;
 /** D1 单条语句最多 100 个参数。 */
 const CHUNK = 90;
-
-/** 绑定缺失（本地开发、测试）时返回 undefined。 */
-export function vectorIndex(env: Env): VectorizeIndex | undefined {
-	return (env as { EMBED_INDEX?: VectorizeIndex }).EMBED_INDEX;
-}
 
 // ---------------------------------------------------------------- 编码
 
@@ -161,8 +148,8 @@ export function parseFingerprint(fp: Fingerprint | null | undefined): { phash: s
 // ---------------------------------------------------------------- 写入
 
 /**
- * process / fingerprint 任务调用：写 D1，再尽力写 Vectorize，再给已有的主题打分。
- * 只有 D1 写入失败会抛错；Vectorize 失败留给 syncVectors 补写。
+ * process / fingerprint 任务调用：写 D1，更新重复照片的候选对，再给已有的主题打分。
+ * 只有 D1 写入失败会抛错。
  */
 export async function saveFingerprint(env: Env, assetId: string, fp: Fingerprint | null): Promise<boolean> {
 	const parsed = parseFingerprint(fp);
@@ -172,17 +159,12 @@ export async function saveFingerprint(env: Env, assetId: string, fp: Fingerprint
 	}
 	const now = Date.now();
 	const bands = phashBands(parsed.phash);
-	// 先写 Vectorize，成功了就直接插入 indexed = 1，省掉事后再改一遍这一行（和 asset_fp_unindexed 索引）。
-	// D1 写入失败时 Vectorize 里会多出一个没有对应行的向量，查询结果一律用 D1 过滤，不影响。
-	const vectorized = (await upsertVectors(env, [{ id: assetId, embedding: parsed.embedding }])) > 0;
-	// 重写整行（similar_at 回到 NULL，之后重新查近邻），旧向量查出来的相似照片对一起删掉
-	await env.DB.batch([
-		env.DB.prepare(
-			`INSERT OR REPLACE INTO asset_fp (asset_id, model, phash, b0, b1, b2, b3, b4, embedding, indexed, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		).bind(assetId, FP_MODEL_VER, parsed.phash, ...bands, blobOf(parsed.embedding), vectorized ? 1 : 0, now),
-		env.DB.prepare("DELETE FROM similar_pairs WHERE a = ?1 OR b = ?1").bind(assetId),
-	]);
+	await env.DB.prepare(
+		`INSERT OR REPLACE INTO asset_fp (asset_id, model, phash, b0, b1, b2, b3, b4, embedding, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	)
+		.bind(assetId, FP_MODEL_VER, parsed.phash, ...bands, blobOf(parsed.embedding), now)
+		.run();
 	await updateDuplicatePairs(env, [{ id: assetId, phash: parsed.phash, embedding: parsed.embedding }]);
 	await scoreForSmartSets(env, assetId, parsed.embedding);
 	return true;
@@ -192,7 +174,7 @@ export async function saveFingerprint(env: Env, assetId: string, fp: Fingerprint
  * 更新这些照片的候选重复对：按 5 段哈希查可能的近邻（每段都有索引，每张最多 DUPLICATE_NEIGHBOR_MAX 个），
  * 留下汉明距离以内、照片 / 视频一致、向量也几乎一样的，和删掉旧的候选对一起写入。
  * 只存不会变的条件；连拍、拍摄时间、回收站、“不是重复”在读取时过滤。
- * 写指纹时（1 张）和补查相似照片时（scanSimilar，一批）调用；D1 按批读写（每次 batch 最多 50 条语句），不是每张几次请求。
+ * 写指纹时调用；D1 按批读写（每次 batch 最多 50 条语句），不是每张几次请求。
  * 失败不影响任务：删掉 duplicate_pairs_state，下次打开“整理重复”时全量补上。
  */
 export async function updateDuplicatePairs(env: Env, rows: { id: string; phash: string; embedding: Int8Array }[]) {
@@ -244,69 +226,8 @@ function insertPairs(env: Env, pairs: [string, string][]): D1PreparedStatement[]
 	return stmts;
 }
 
-/** 写入 Vectorize，返回写入的条数（失败或没有索引时为 0）。 */
-async function upsertVectors(env: Env, rows: { id: string; embedding: Int8Array }[]): Promise<number> {
-	const index = vectorIndex(env);
-	if (!index || !rows.length) return 0;
-	try {
-		await index.upsert(rows.map((r) => ({ id: r.id, values: Array.from(r.embedding) })));
-	} catch (e) {
-		console.warn(JSON.stringify({ event: "vectorize_upsert_failed", count: rows.length, error: String(e).slice(0, 300) }));
-		return 0;
-	}
-	return rows.length;
-}
-
 /**
- * 补写已经在 D1 里的向量：写入 Vectorize，成功后标记 indexed（updated_at 不变才标记，期间被重写过的留给下一次）。
- * updated_at 同时改成现在：它也是“进索引的时间”，相似照片要等进索引 SIMILAR_SCAN_SETTLE_MS 之后才查（similar-groups.ts）。
- */
-async function indexVectors(env: Env, rows: { id: string; embedding: Int8Array; updatedAt: number }[]) {
-	if (!(await upsertVectors(env, rows))) return 0;
-	const now = Date.now();
-	for (let i = 0; i < rows.length; i += 50) {
-		await env.DB.batch(
-			rows.slice(i, i + 50).map((r) =>
-				env.DB.prepare("UPDATE asset_fp SET indexed = 1, updated_at = ? WHERE asset_id = ? AND updated_at = ?").bind(now, r.id, r.updatedAt),
-			),
-		);
-	}
-	return rows.length;
-}
-
-/** 每小时 Cron：补写还没进 Vectorize 的向量，每次最多 VECTOR_SYNC_BATCH 条。熔断时跳过。 */
-export async function syncVectors(env: Env): Promise<number> {
-	if (!vectorIndex(env) || (await guardStub(env).isTripped())) return 0;
-	const { results } = await env.DB.prepare(
-		"SELECT asset_id, embedding, updated_at FROM asset_fp WHERE indexed = 0 ORDER BY updated_at LIMIT ?",
-	)
-		.bind(VECTOR_SYNC_BATCH)
-		.all<{ asset_id: string; embedding: ArrayBuffer; updated_at: number }>();
-	let done = 0;
-	// Workers 绑定每次 upsert 最多 1000 条
-	for (let i = 0; i < results.length; i += 500) {
-		done += await indexVectors(
-			env,
-			results.slice(i, i + 500).map((r) => ({ id: r.asset_id, embedding: asInt8(r.embedding), updatedAt: r.updated_at })),
-		);
-	}
-	if (results.length) console.log(JSON.stringify({ event: "vectors_synced", count: done, pending: results.length }));
-	return done;
-}
-
-/** 永久删除 / Live Photo 合并时调用：尽力删掉索引里的向量（失败也没关系，查询结果会被 D1 过滤）。 */
-export async function deleteVectors(env: Env, ids: string[]) {
-	const index = vectorIndex(env);
-	if (!index || !ids.length) return;
-	try {
-		for (let i = 0; i < ids.length; i += 1000) await index.deleteByIds(ids.slice(i, i + 1000));
-	} catch (e) {
-		console.warn(JSON.stringify({ event: "vectorize_delete_failed", count: ids.length, error: String(e).slice(0, 300) }));
-	}
-}
-
-/**
- * 新照片处理完：用每个训练过的主题（最多 SMART_SET_MAX 个）打一次分，够像的进“建议”。不读全库，不调用 Vectorize。
+ * 新照片处理完：用每个训练过的主题（最多 SMART_SET_MAX 个）打一次分，够像的进“建议”。不读全库。
  * 指定了范围的主题只在照片位于范围里（某个范围文件夹是它的文件夹或上级）时打分。
  */
 async function scoreForSmartSets(env: Env, assetId: string, embedding: Int8Array) {
@@ -345,35 +266,6 @@ async function scoreForSmartSets(env: Env, assetId: string, embedding: Int8Array
 
 // ---------------------------------------------------------------- 查询
 
-interface Neighbor {
-	id: string;
-	score: number;
-}
-
-/**
- * 近邻查询：Vectorize 取前 topK 个（topK 最多 50），再用 D1 过滤掉不可见的条目。
- * 必须带 returnValues：不带时 Vectorize 返回的是量化后的近似分数，CLIP 向量上整体压低很多
- * （线上实测照片和自己的相似度只有 0.77，0.94 的近邻只有 0.70），和固定阈值比较就一个都选不出来。
- * 返回 null 表示没有索引可用。
- */
-export async function nearest(env: Env, vector: ArrayLike<number>, topK: number, minScore: number): Promise<Neighbor[] | null> {
-	const index = vectorIndex(env);
-	if (!index) return null;
-	let matches: { id: string; score: number }[];
-	try {
-		({ matches } = await index.query(Array.from(vector), { topK: Math.min(topK, 50), returnValues: true, returnMetadata: "none" }));
-	} catch (e) {
-		console.warn(JSON.stringify({ event: "vectorize_query_failed", error: String(e).slice(0, 300) }));
-		return null;
-	}
-	return matches.filter((m) => m.score >= minScore && ID.safeParse(m.id).success).map((m) => ({ id: m.id, score: m.score }));
-}
-
-/** 按给定顺序取出可见的条目（不在回收站、已处理完）。 */
-async function visibleItems(env: Env, ids: string[]): Promise<Map<string, ItemRow>> {
-	return selectByIds<ItemRow>(env, ITEM_COLUMNS, ids);
-}
-
 /** 按 id 分块查可见条目，所有分块一起发（每次 batch 最多 50 条语句），不一条等一条。 */
 export async function selectByIds<T extends { id: string }>(env: Env, columns: string, ids: string[]): Promise<Map<string, T>> {
 	const rows = new Map<string, T>();
@@ -387,48 +279,6 @@ export async function selectByIds<T extends { id: string }>(env: Env, columns: s
 	}
 	return rows;
 }
-
-async function embeddingOf(env: Env, assetId: string): Promise<Int8Array | null> {
-	const row = await env.DB.prepare("SELECT embedding FROM asset_fp WHERE asset_id = ? AND model = ?")
-		.bind(assetId, FP_MODEL_VER)
-		.first<{ embedding: ArrayBuffer }>();
-	return row ? asInt8(row.embedding) : null;
-}
-
-/** 已经进索引、还没查过相似照片（scanSimilar）的张数（部分索引 asset_fp_similar_pending，查完之后是 0 行）。 */
-export async function similarPending(env: Env): Promise<number> {
-	const row = await env.DB.prepare(
-		"SELECT COUNT(*) AS n FROM asset_fp INDEXED BY asset_fp_similar_pending WHERE similar_at IS NULL AND indexed = 1",
-	).first<{ n: number }>();
-	return row?.n ?? 0;
-}
-
-/** 相似照片：同一组连拍的其他照片不算（已经在连拍页里了）。 */
-similar.get("/assets/:id/similar", async (c) => {
-	const id = ID.parse(c.req.param("id"));
-	const embedding = await embeddingOf(c.env, id);
-	if (!embedding) return c.json({ items: [], next: null, fingerprinted: false });
-	const near = await nearest(c.env, embedding, SIMILAR_TOP_K + 1, SIMILAR_MIN_SCORE);
-	if (!near) return c.json({ items: [], next: null, fingerprinted: true, unavailable: true });
-	const self = await c.env.DB.prepare("SELECT burst_id FROM assets WHERE id = ?").bind(id).first<{ burst_id: string | null }>();
-	const others = near.filter((n) => n.id !== id);
-	const rows = await visibleItems(c.env, others.map((n) => n.id));
-	let burstMates = new Set<string>();
-	if (self?.burst_id) {
-		const { results } = await c.env.DB.prepare("SELECT id FROM assets WHERE burst_id = ?").bind(self.burst_id).all<{ id: string }>();
-		burstMates = new Set(results.map((r) => r.id));
-	}
-	const items: TimelineItem[] = [];
-	const scores: number[] = [];
-	for (const n of others) {
-		const r = rows.get(n.id);
-		if (!r || burstMates.has(n.id) || items.length >= SIMILAR_TOP_K) continue;
-		items.push(toItem(r));
-		scores.push(Math.round(n.score * 1000) / 1000);
-	}
-	// next: null 让前端可以直接当作普通列表（LibraryList）使用
-	return c.json({ items, next: null, scores, fingerprinted: true });
-});
 
 // ---------------------------------------------------------------- 重复照片
 
@@ -704,8 +554,7 @@ similar.get("/duplicates", async (c) => {
 		total: groups.length,
 		next: offset + GROUP_PAGE < groups.length ? offset + GROUP_PAGE : null,
 		scanned: (countRes!.results[0] as { n: number } | undefined)?.n ?? 0,
-		// 补建时被截断的部分由补查相似照片（scanSimilar）逐张补上，查完就不再是“只检查了一部分”
-		truncated: (truncated && (await similarPending(c.env)) > 0) || pairRows.length >= DUPLICATE_PAIR_MAX,
+		truncated: truncated || pairRows.length >= DUPLICATE_PAIR_MAX,
 	});
 });
 
@@ -777,12 +626,9 @@ similar.get("/fingerprints/status", async (c) => {
 		c.env.DB.prepare(`SELECT COUNT(*) AS n FROM assets a WHERE ${VISIBLE}`),
 		c.env.DB.prepare(`SELECT COUNT(*) AS n ${MISSING_FP}`),
 	]);
-	const unindexed = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM asset_fp WHERE indexed = 0").first<{ n: number }>();
 	return c.json({
 		total: total?.results[0]?.n ?? 0,
 		missing: missing?.results[0]?.n ?? 0,
-		unindexed: unindexed?.n ?? 0,
-		indexAvailable: !!vectorIndex(c.env),
 	});
 });
 

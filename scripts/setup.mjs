@@ -159,7 +159,6 @@ async function main() {
 	ensure("Queue nana-jobs", ["queues", "create", "nana-jobs"]);
 	ensure("Queue nana-jobs-dlq", ["queues", "create", "nana-jobs-dlq"]);
 	// 维度和度量创建后不能改。
-	ensure("Vectorize nana-embed", ["vectorize", "create", "nana-embed", "--dimensions=512", "--metric=cosine"]);
 	ensure("Vectorize nana-faces", ["vectorize", "create", "nana-faces", "--dimensions=512", "--metric=cosine"]);
 	console.log("  Keep the R2 bucket at its defaults: no public access, no r2.dev subdomain, no custom domain.");
 

@@ -14,7 +14,7 @@ import { handlers, type RunningJob } from "./jobs";
 import { type DeriveOutput, processorStub } from "./processor";
 import { saveFaces } from "./people";
 import { deleteSearchRows, replaceSearchRow } from "./search";
-import { deleteVectors, saveFingerprint } from "./similar";
+import { saveFingerprint } from "./similar";
 import { ulid } from "./ulid";
 
 /**
@@ -362,7 +362,6 @@ async function mergeLivePhoto(env: Env, asset: AssetRow, cid: string): Promise<b
 		env.DB.prepare("DELETE FROM assets WHERE id = ?").bind(videoId),
 	]);
 	if (derived.length) await env.PHOTOS.delete(derived.map((r) => r.r2_key));
-	await deleteVectors(env, [videoId]);
 	console.log(JSON.stringify({ event: "live_photo_merged", photoId, videoId }));
 	return true;
 }

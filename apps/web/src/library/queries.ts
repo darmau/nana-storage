@@ -126,29 +126,12 @@ export interface SmartSetDetail extends SmartSetSummary {
 /** 样本的标签和分数矛盾：分类器认不出来的正例，或者它很确定的反例（和服务端的 SMART_SET_CONFLICT 一致）。 */
 export const sampleConflict = (label: 1 | -1, score: number | null) =>
 	score !== null && (label > 0 ? score < SMART_SET_CONFLICT.positiveBelow : score >= SMART_SET_CONFLICT.negativeFrom);
-export interface SimilarResult extends Page {
-	/** false：这张照片还没有指纹 */
-	fingerprinted: boolean;
-	/** 相似索引暂时不可用（本地开发时没有 Vectorize） */
-	unavailable?: boolean;
-}
 export interface DuplicateGroups {
 	groups: { keep: string; items: TimelineItem[] }[];
 	total: number;
 	next: number | null;
 	scanned: number;
 	truncated: boolean;
-}
-/** 相似照片的待整理队列（一页）。 */
-export interface SimilarGroups {
-	/** 推荐保留的在每组最前面；snoozed：点过“暂不处理”（排在队列末尾） */
-	groups: { keep: string; items: TimelineItem[]; snoozed: boolean }[];
-	/** 下一页的位置，null 表示到底了 */
-	next: string | null;
-	/** 还没比较过的张数 */
-	pending: number;
-	/** 本地开发没有 Vectorize：不比较新照片 */
-	unavailable?: boolean;
 }
 export const smartSetsQuery = {
 	queryKey: ["smart-sets"],
@@ -160,9 +143,3 @@ export const storageSummaryQuery = {
 	queryFn: () => api<StorageSummary>("/stats/summary"),
 	staleTime: 5 * 60_000,
 };
-export const similarQuery = (id: string) => ({
-	queryKey: ["similar", id],
-	queryFn: () => api<SimilarResult>(`/assets/${id}/similar`),
-	staleTime: 60_000,
-});
-

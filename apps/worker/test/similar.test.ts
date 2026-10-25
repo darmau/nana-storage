@@ -1,6 +1,6 @@
 import { SELF, env } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { DUPLICATE_MAX_HAMMING, FP_DIMS, FP_MODEL_VER, SIMILAR_SCAN_SETTLE_MS, SMART_SET_CRON_QUIET_MS, SMART_SET_CV_MIN } from "@nana/shared";
+import { DUPLICATE_MAX_HAMMING, FP_DIMS, FP_MODEL_VER, SMART_SET_CRON_QUIET_MS, SMART_SET_CV_MIN } from "@nana/shared";
 import { guardStub } from "../src/guard";
 import { deleteAssetsPermanently } from "../src/purge";
 import {
@@ -16,17 +16,11 @@ import {
 	refreshStaleSmartSets,
 	saveFingerprint,
 	similar,
-	syncVectors,
 } from "../src/similar";
-import { encodeCursor, scanSimilar, similarGroups } from "../src/similar-groups";
 import { decodeClassifier, encodeClassifier, score, trainClassifier } from "../src/smartset-model";
-import { FakeIndex } from "./fake-index";
 import { authHeaders, mockAccessJwks } from "./helpers";
 
 beforeAll(() => mockAccessJwks());
-
-let index: FakeIndex;
-const withIndex = () => ({ ...env, EMBED_INDEX: index as unknown as VectorizeIndex }) as Env;
 
 // 确定性的伪随机数，测试结果可复现
 let seed = 1;
@@ -74,7 +68,6 @@ async function call<T = any>(e: Env, method: string, path: string, body?: unknow
 }
 
 beforeEach(async () => {
-	index = new FakeIndex();
 	await guardStub(env).reset();
 	await env.DB.batch([
 		env.DB.prepare("DELETE FROM smart_set_suggestions"),
@@ -84,9 +77,6 @@ beforeEach(async () => {
 		env.DB.prepare("DELETE FROM duplicate_ignores"),
 		env.DB.prepare("DELETE FROM duplicate_pairs"),
 		env.DB.prepare("DELETE FROM duplicate_pairs_state"),
-		env.DB.prepare("DELETE FROM similar_pairs"),
-		env.DB.prepare("DELETE FROM similar_snoozes"),
-		env.DB.prepare("DELETE FROM similar_state"),
 		env.DB.prepare("DELETE FROM faces"),
 		env.DB.prepare("DELETE FROM people"),
 		env.DB.prepare("DELETE FROM jobs"),
@@ -207,68 +197,29 @@ describe("smart set classifier", () => {
 });
 
 describe("fingerprint storage", () => {
-	it("writes D1 and the index, and falls back to the hourly sync when the index fails", async () => {
+	it("writes the fingerprint to D1, replacing an older one", async () => {
 		await seed_(1);
-		await seed_(2);
-		expect(await saveFingerprint(withIndex(), aid(1), fp(randomHash(), randomVec()))).toBe(true);
-		expect(index.vectors.has(aid(1))).toBe(true);
-
-		index.fail = true;
-		expect(await saveFingerprint(withIndex(), aid(2), fp(randomHash(), randomVec()))).toBe(true); // 不让任务失败
-		const rows = await env.DB.prepare("SELECT asset_id, indexed, b0 FROM asset_fp ORDER BY asset_id").all<{ asset_id: string; indexed: number }>();
-		expect(rows.results.map((r) => r.indexed)).toEqual([1, 0]);
-
-		index.fail = false;
-		expect(await syncVectors(withIndex())).toBe(1);
-		expect(index.vectors.has(aid(2))).toBe(true);
-		expect(await syncVectors(withIndex())).toBe(0);
-
-		// 熔断时不补写
-		await env.DB.prepare("UPDATE asset_fp SET indexed = 0").run();
-		await guardStub(env).trip("test");
-		expect(await syncVectors(withIndex())).toBe(0);
+		const h = randomHash();
+		expect(await saveFingerprint(env, aid(1), fp(randomHash(), randomVec()))).toBe(true);
+		expect(await saveFingerprint(env, aid(1), fp(h, randomVec()))).toBe(true);
+		const rows = await env.DB.prepare("SELECT phash, b0 FROM asset_fp").all<{ phash: string; b0: number }>();
+		expect(rows.results).toEqual([{ phash: h, b0: phashBands(h)[0] }]);
 	});
 
 	it("rejects malformed fingerprints without failing", async () => {
 		await seed_(1);
-		expect(await saveFingerprint(withIndex(), aid(1), null)).toBe(false);
-		expect(await saveFingerprint(withIndex(), aid(1), { model: FP_MODEL_VER, phash: "xyz", embedding: "" })).toBe(false);
-		expect(await saveFingerprint(withIndex(), aid(1), { ...fp(randomHash(), randomVec()), model: "old-model" })).toBe(false);
-		expect(await saveFingerprint(withIndex(), aid(1), { model: FP_MODEL_VER, phash: randomHash(), embedding: btoa("short") })).toBe(false);
+		expect(await saveFingerprint(env, aid(1), null)).toBe(false);
+		expect(await saveFingerprint(env, aid(1), { model: FP_MODEL_VER, phash: "xyz", embedding: "" })).toBe(false);
+		expect(await saveFingerprint(env, aid(1), { ...fp(randomHash(), randomVec()), model: "old-model" })).toBe(false);
+		expect(await saveFingerprint(env, aid(1), { model: FP_MODEL_VER, phash: randomHash(), embedding: btoa("short") })).toBe(false);
 		expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM asset_fp").first("n")).toBe(0);
 	});
 
-	it("permanent delete removes the fingerprint and the vector", async () => {
+	it("permanent delete removes the fingerprint", async () => {
 		await seed_(1);
-		await saveFingerprint(withIndex(), aid(1), fp(randomHash(), randomVec()));
-		await deleteAssetsPermanently(withIndex(), [aid(1)]);
-		expect(index.deleted).toEqual([aid(1)]);
-		expect(index.vectors.size).toBe(0);
+		await saveFingerprint(env, aid(1), fp(randomHash(), randomVec()));
+		await deleteAssetsPermanently(env, [aid(1)]);
 		expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM asset_fp").first("n")).toBe(0);
-	});
-});
-
-describe("similar photos", () => {
-	it("returns visible neighbours above the threshold, never self, trashed, or burst mates", async () => {
-		const base = randomVec();
-		for (let i = 1; i <= 6; i++) await seed_(i, { deleted: i === 3, burst: i === 4 || i === 1 ? "B1" : undefined });
-		await saveFingerprint(withIndex(), aid(1), fp(randomHash(), base));
-		await saveFingerprint(withIndex(), aid(2), fp(randomHash(), near(base))); // 相似
-		await saveFingerprint(withIndex(), aid(3), fp(randomHash(), near(base))); // 在回收站
-		await saveFingerprint(withIndex(), aid(4), fp(randomHash(), near(base))); // 同一组连拍
-		await saveFingerprint(withIndex(), aid(5), fp(randomHash(), randomVec())); // 不像
-		// 6 没有指纹
-
-		const r = await call(withIndex(), "GET", `/assets/${aid(1)}/similar`);
-		expect(r.status).toBe(200);
-		expect(r.json.items.map((i: unknown[]) => i[0])).toEqual([aid(2)]);
-		expect(r.json.scores[0]).toBeGreaterThan(0.85);
-
-		expect((await call(withIndex(), "GET", `/assets/${aid(6)}/similar`)).json).toEqual({ items: [], next: null, fingerprinted: false });
-		// 没有索引（本地开发）：空结果，并说明原因
-		expect((await call(env, "GET", `/assets/${aid(1)}/similar`)).json).toMatchObject({ items: [], unavailable: true });
-		index.fail = true;
-		expect((await call(withIndex(), "GET", `/assets/${aid(1)}/similar`)).json).toMatchObject({ items: [], unavailable: true });
 	});
 });
 
@@ -282,14 +233,14 @@ describe("duplicates", () => {
 		await seed_(4, { deleted: true });
 		await seed_(5);
 		await seed_(6);
-		await saveFingerprint(withIndex(), aid(1), fp(h, near(v)));
-		await saveFingerprint(withIndex(), aid(2), fp(flipBits(h, 2), near(v)));
-		await saveFingerprint(withIndex(), aid(3), fp(flipBits(h, 4), near(v)));
-		await saveFingerprint(withIndex(), aid(4), fp(h, near(v)));
-		await saveFingerprint(withIndex(), aid(5), fp(randomHash(), near(v)));
-		await saveFingerprint(withIndex(), aid(6), fp(h, randomVec())); // 哈希相同，但内容明显不同
+		await saveFingerprint(env, aid(1), fp(h, near(v)));
+		await saveFingerprint(env, aid(2), fp(flipBits(h, 2), near(v)));
+		await saveFingerprint(env, aid(3), fp(flipBits(h, 4), near(v)));
+		await saveFingerprint(env, aid(4), fp(h, near(v)));
+		await saveFingerprint(env, aid(5), fp(randomHash(), near(v)));
+		await saveFingerprint(env, aid(6), fp(h, randomVec())); // 哈希相同，但内容明显不同
 
-		const r = await call(withIndex(), "GET", "/duplicates");
+		const r = await call(env, "GET", "/duplicates");
 		expect(r.json.total).toBe(1);
 		expect(r.json.groups[0].keep).toBe(aid(2));
 		expect(r.json.groups[0].items.map((i: unknown[]) => i[0]).sort()).toEqual([aid(1), aid(2), aid(3)]);
@@ -301,25 +252,25 @@ describe("duplicates", () => {
 		const v = randomVec();
 		for (const n of [1, 2, 3]) {
 			await seed_(n);
-			await saveFingerprint(withIndex(), aid(n), fp(h, near(v)));
+			await saveFingerprint(env, aid(n), fp(h, near(v)));
 		}
-		const ids = () => call(withIndex(), "GET", "/duplicates").then((r) => r.json.groups.map((g: { items: unknown[][] }) => g.items.map((i) => i[0]).sort()));
+		const ids = () => call(env, "GET", "/duplicates").then((r) => r.json.groups.map((g: { items: unknown[][] }) => g.items.map((i) => i[0]).sort()));
 		expect(await ids()).toEqual([[aid(1), aid(2), aid(3)]]);
 
 		// 3 和另外两张不一样
-		expect((await call(withIndex(), "POST", "/duplicates/ignore", { ids: [aid(1), aid(2), aid(3)], pivot: aid(3) })).json).toEqual({ pairs: 2 });
+		expect((await call(env, "POST", "/duplicates/ignore", { ids: [aid(1), aid(2), aid(3)], pivot: aid(3) })).json).toEqual({ pairs: 2 });
 		expect(await ids()).toEqual([[aid(1), aid(2)]]);
 		// 整组都不是重复
-		await call(withIndex(), "POST", "/duplicates/ignore", { ids: [aid(1), aid(2)] });
+		await call(env, "POST", "/duplicates/ignore", { ids: [aid(1), aid(2)] });
 		expect(await ids()).toEqual([]);
 		// 重复标记不报错；撤销后恢复
-		expect((await call(withIndex(), "POST", "/duplicates/ignore", { ids: [aid(2), aid(1)] })).status).toBe(200);
-		await call(withIndex(), "POST", "/duplicates/unignore", { ids: [aid(1), aid(2), aid(3)] });
+		expect((await call(env, "POST", "/duplicates/ignore", { ids: [aid(2), aid(1)] })).status).toBe(200);
+		await call(env, "POST", "/duplicates/unignore", { ids: [aid(1), aid(2), aid(3)] });
 		expect(await ids()).toEqual([[aid(1), aid(2), aid(3)]]);
 
 		// 不存在的条目跳过；永久删除时级联删除
-		expect((await call(withIndex(), "POST", "/duplicates/ignore", { ids: [aid(1), aid(99)] })).json).toEqual({ pairs: 0 });
-		await call(withIndex(), "POST", "/duplicates/ignore", { ids: [aid(1), aid(2)] });
+		expect((await call(env, "POST", "/duplicates/ignore", { ids: [aid(1), aid(99)] })).json).toEqual({ pairs: 0 });
+		await call(env, "POST", "/duplicates/ignore", { ids: [aid(1), aid(2)] });
 		await env.DB.prepare("DELETE FROM assets WHERE id = ?").bind(aid(1)).run();
 		expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM duplicate_ignores").first("n")).toBe(0);
 	});
@@ -329,16 +280,16 @@ describe("duplicate pairs", () => {
 	const pairs = async () =>
 		(await env.DB.prepare("SELECT a, b FROM duplicate_pairs ORDER BY a, b").all<{ a: string; b: string }>()).results.map((r) => `${r.a}:${r.b}`);
 	const groupIds = () =>
-		call(withIndex(), "GET", "/duplicates").then((r) => r.json.groups.map((g: { items: unknown[][] }) => g.items.map((i) => i[0]).sort()));
+		call(env, "GET", "/duplicates").then((r) => r.json.groups.map((g: { items: unknown[][] }) => g.items.map((i) => i[0]).sort()));
 
 	it("keeps candidate pairs up to date as fingerprints are written", async () => {
 		const h = randomHash();
 		const v = randomVec();
 		for (const n of [1, 2, 3]) await seed_(n);
 		await env.DB.prepare("INSERT INTO duplicate_pairs_state (id, built_at) VALUES (1, 0)").run();
-		await saveFingerprint(withIndex(), aid(1), fp(h, near(v)));
-		await saveFingerprint(withIndex(), aid(2), fp(flipBits(h, 3), near(v)));
-		await saveFingerprint(withIndex(), aid(3), fp(h, randomVec())); // 向量不像，不存
+		await saveFingerprint(env, aid(1), fp(h, near(v)));
+		await saveFingerprint(env, aid(2), fp(flipBits(h, 3), near(v)));
+		await saveFingerprint(env, aid(3), fp(h, randomVec())); // 向量不像，不存
 		expect(await pairs()).toEqual([`${aid(1)}:${aid(2)}`]);
 		expect(await groupIds()).toEqual([[aid(1), aid(2)]]);
 
@@ -352,7 +303,7 @@ describe("duplicate pairs", () => {
 		expect(await groupIds()).toEqual([[aid(1), aid(2)]]);
 
 		// 重新处理后哈希变了：旧的候选对删掉
-		await saveFingerprint(withIndex(), aid(2), fp(randomHash(), near(v)));
+		await saveFingerprint(env, aid(2), fp(randomHash(), near(v)));
 		expect(await pairs()).toEqual([]);
 	});
 
@@ -361,11 +312,11 @@ describe("duplicate pairs", () => {
 		const v = randomVec();
 		for (const n of [1, 2, 3, 4]) {
 			await seed_(n, n === 4 ? { deleted: true } : {});
-			await saveFingerprint(withIndex(), aid(n), fp(n === 3 ? randomHash() : flipBits(h, n === 4 ? 1 : n), near(v)));
+			await saveFingerprint(env, aid(n), fp(n === 3 ? randomHash() : flipBits(h, n === 4 ? 1 : n), near(v)));
 		}
 		// 模拟部署前：没有候选对，也没有建好的标记
 		await env.DB.batch([env.DB.prepare("DELETE FROM duplicate_pairs"), env.DB.prepare("DELETE FROM duplicate_pairs_state")]);
-		const r = await call(withIndex(), "GET", "/duplicates");
+		const r = await call(env, "GET", "/duplicates");
 		expect(r.json.groups.map((g: { items: unknown[][] }) => g.items.map((i) => i[0]).sort())).toEqual([[aid(1), aid(2)]]);
 		expect(r.json.scanned).toBe(3);
 		// 回收站里的也建好了，恢复后直接出现
@@ -376,174 +327,12 @@ describe("duplicate pairs", () => {
 	});
 });
 
-describe("similar groups", () => {
-	const later = () => Date.now() + SIMILAR_SCAN_SETTLE_MS + 1;
-	async function get(e: Env = withIndex(), cursor?: string) {
-		const res = await similarGroups.request(`/similar-groups${cursor ? `?cursor=${cursor}` : ""}`, {}, e);
-		return (await res.json()) as any;
-	}
-	const ids = (r: { groups: { items: unknown[][] }[] }) => r.groups.map((g) => g.items.map((i) => i[0] as string).sort());
-	const groupIds = async () => ids(await get());
-	const post = async (path: string, body: unknown) =>
-		(await (await similarGroups.request(path, { method: "POST", body: JSON.stringify(body) }, withIndex())).json()) as any;
-	const n = async (id: string) => (await env.DB.prepare("SELECT similar_n FROM asset_fp WHERE asset_id = ?").bind(id).first("similar_n")) as number;
-	async function addFace(asset: number, person: string) {
-		await env.DB.prepare("INSERT OR IGNORE INTO people (id, created_at, updated_at) VALUES (?, 0, 0)").bind(person).run();
-		await env.DB.prepare(
-			`INSERT INTO faces (id, asset_id, idx, x, y, w, h, px, score, sharpness, embedding, person_id, created_at)
-			 VALUES (?, ?, 0, 0, 0, 1, 1, 100, 1, 1, x'00', ?, 0)`,
-		)
-			.bind(`F${asset}${person}`, aid(asset), person)
-			.run();
-	}
-	/** 建几组互相相似的照片（组和组之间不像），查完近邻。 */
-	async function seedGroups(sizes: number[]) {
-		const out: string[][] = [];
-		for (let g = 0; g < sizes.length; g++) {
-			const v = randomVec();
-			const members: string[] = [];
-			for (let k = 1; k <= sizes[g]!; k++) {
-				const num = g * 100 + k;
-				await seed_(num);
-				await saveFingerprint(withIndex(), aid(num), fp(randomHash(), near(v)));
-				members.push(aid(num));
-			}
-			out.push(members);
-		}
-		await scanSimilar(withIndex(), 1000, later());
-		return out;
-	}
-
-	it("finds look-alikes by content only, once each vector has settled in the index", async () => {
-		const v = randomVec();
-		for (let k = 1; k <= 7; k++) await seed_(k, { width: k === 2 ? 8000 : 4000, deleted: k === 5, kind: k === 6 ? "video" : "photo" });
-		for (const k of [1, 2, 3, 5, 6]) await saveFingerprint(withIndex(), aid(k), fp(randomHash(), near(v, 40))); // 哈希各不相同
-		await saveFingerprint(withIndex(), aid(4), fp(randomHash(), randomVec())); // 不像
-		// 刚进索引的先不查
-		expect(await scanSimilar(withIndex(), 100)).toBe(0);
-		expect((await get()).pending).toBe(6);
-		expect(await scanSimilar(withIndex(), 100, later())).toBe(6);
-		expect(await scanSimilar(withIndex(), 100, later())).toBe(0); // 每张只查一次
-		expect(index.queries).toBe(6);
-
-		const r = await get();
-		expect(r.groups[0].keep).toBe(aid(2)); // 分辨率最高
-		expect(r.groups[0].items[0][0]).toBe(aid(2)); // 推荐的在最前面
-		// 回收站、视频、不像的都不在里面
-		expect(ids(r)).toEqual([[aid(1), aid(2), aid(3)]]);
-		expect(r).toMatchObject({ pending: 0, next: null });
-
-		// 归档后不再出现；指纹重写后旧的照片对删掉，重新查
-		await env.DB.prepare("UPDATE assets SET archived = 1 WHERE id = ?").bind(aid(3)).run();
-		expect(await groupIds()).toEqual([[aid(1), aid(2)]]);
-		await saveFingerprint(withIndex(), aid(1), fp(randomHash(), randomVec()));
-		expect(await groupIds()).toEqual([]);
-		expect((await get()).pending).toBe(1);
-
-		// 熔断时不查；没有索引时不查，接口说明原因
-		await guardStub(env).trip("test");
-		expect(await scanSimilar(withIndex(), 100, later())).toBe(0);
-		await guardStub(env).reset();
-		expect(await scanSimilar(env, 100, later())).toBe(0);
-		expect((await get(env)).unavailable).toBe(true);
-	});
-
-	it("also fills in duplicate pairs for photos fingerprinted before the pairs existed", async () => {
-		const h = randomHash();
-		const v = randomVec();
-		for (const k of [1, 2]) {
-			await seed_(k);
-			await saveFingerprint(withIndex(), aid(k), fp(flipBits(h, k), near(v)));
-		}
-		// 模拟全量补建被截断：没有候选对
-		await env.DB.batch([
-			env.DB.prepare("DELETE FROM duplicate_pairs"),
-			env.DB.prepare("INSERT OR REPLACE INTO duplicate_pairs_state (id, built_at, truncated) VALUES (1, 0, 1)"),
-		]);
-		expect((await call(withIndex(), "GET", "/duplicates")).json).toMatchObject({ total: 0, truncated: true });
-		await scanSimilar(withIndex(), 100, later());
-		expect((await call(withIndex(), "GET", "/duplicates")).json).toMatchObject({ total: 1, truncated: false });
-	});
-
-	it("serves the queue page by page, biggest groups first, each group once", async () => {
-		const [big, mid, small] = await seedGroups([4, 3, 2]);
-		const r = await get();
-		expect(ids(r)).toEqual([big, mid, small]);
-		expect(r.next).toBeNull();
-		// 从大组的中心之后接着取（模拟翻页）：大组的其他照片不会换个中心再列一遍
-		const centre = big![0]!;
-		expect(ids(await get(withIndex(), encodeCursor({ phase: 1, n: await n(centre), id: centre })))).toEqual([mid, small]);
-		expect(ids(await get(withIndex(), "garbage"))).toEqual([big, mid, small]); // 认不出的位置从头开始
-	});
-
-	it("retires centres with nothing left to group, and recount brings them back on undo", async () => {
-		const [g] = await seedGroups([3]);
-		const [a, b, c] = g!;
-		// 其余两张移到回收站：剩下的一张没有可分的照片，读一次之后不再当中心
-		await env.DB.prepare("UPDATE assets SET deleted_at = 1 WHERE id IN (?, ?)").bind(b, c).run();
-		await post("/similar-groups/recount", { ids: g });
-		expect([await n(b!), await n(c!)]).toEqual([0, 0]);
-		expect(await groupIds()).toEqual([]);
-		expect(await n(a!)).toBe(0);
-		// 撤销：恢复后重新计数，又回到队列
-		await env.DB.prepare("UPDATE assets SET deleted_at = NULL WHERE id IN (?, ?)").bind(b, c).run();
-		await post("/similar-groups/recount", { ids: g });
-		expect(await groupIds()).toEqual([[a, b, c].sort()]);
-	});
-
-	it("does not group photos of different people, and looks again when people change", async () => {
-		const [g] = await seedGroups([2]);
-		expect(await groupIds()).toEqual([g]);
-		// 一边没认出人物：不按人物判断
-		await addFace(1, "P1");
-		expect(await groupIds()).toEqual([g]);
-		// 两边是不同的人：不成组，先放到一边
-		await addFace(2, "P2");
-		expect(await groupIds()).toEqual([]);
-		expect(await n(aid(1))).toBe(-1);
-		// 人物有变化（合照里也有 P1）：重新计数后又能成组
-		await addFace(2, "P1");
-		await env.DB.prepare("UPDATE cache_versions SET v = v + 1 WHERE name = 'people'").run();
-		expect(await groupIds()).toEqual([g]);
-	});
-
-	it("snoozed groups go to the end of the queue, oldest snooze first", async () => {
-		const [a, b, c] = await seedGroups([4, 3, 2]);
-		const order = async () => (await get()).groups.map((g: { items: unknown[][]; snoozed: boolean }) => [g.items.map((i) => i[0]).sort(), g.snoozed]);
-		expect(await post("/similar-groups/snooze", { ids: [...a!, aid(99)] })).toEqual({ snoozed: 4 }); // 不存在的跳过
-		await new Promise((r) => setTimeout(r, 2));
-		await post("/similar-groups/snooze", { ids: b });
-		expect(await order()).toEqual([
-			[c, false],
-			[a, true],
-			[b, true],
-		]);
-		// 再点一次，又排到最后
-		await new Promise((r) => setTimeout(r, 2));
-		await post("/similar-groups/snooze", { ids: a });
-		expect((await order()).map(([g]: [string[]]) => g)).toEqual([c, b, a]);
-	});
-
-	it("each photo is in at most one group per page, grouped around a centre", async () => {
-		// 中心 0 像 1、2；3 只像 2：2 已经被分走，3 不成组（不会把不像的 0 和 3 连进同一组）
-		const base = randomVec();
-		const vs = [base, near(base, 25), near(base, 25)];
-		for (let k = 0; k < 3; k++) {
-			await seed_(k + 1);
-			await saveFingerprint(withIndex(), aid(k + 1), fp(randomHash(), vs[k]!));
-		}
-		await scanSimilar(withIndex(), 100, later());
-		const r = ids(await get());
-		expect(r.flat().length).toBe(new Set(r.flat()).size);
-	});
-});
-
 describe("fingerprint status", () => {
 	it("counts visible assets without a current fingerprint", async () => {
 		for (let i = 1; i <= 4; i++) await seed_(i, { deleted: i === 4 });
-		await saveFingerprint(withIndex(), aid(1), fp(randomHash(), randomVec()));
-		const status = await call(withIndex(), "GET", "/fingerprints/status");
-		expect(status.json).toMatchObject({ total: 3, missing: 2, indexAvailable: true });
+		await saveFingerprint(env, aid(1), fp(randomHash(), randomVec()));
+		const status = await call(env, "GET", "/fingerprints/status");
+		expect(status.json).toEqual({ total: 3, missing: 2 });
 	});
 });
 
@@ -824,14 +613,5 @@ describe("smart sets", () => {
 		expect(await post("/duplicates/ignore", { ids: [aid(1)] })).toBe(400);
 		expect(await post("/duplicates/ignore", { ids: [aid(1), aid(2)], pivot: aid(3) })).toBe(400);
 		expect((await SELF.fetch("http://example.com/api/duplicates")).status).toBe(403); // 没有身份
-		expect(await post("/similar-groups/snooze", { ids: [] })).toBe(400);
-		expect(await post("/similar-groups/snooze", { ids: ["x"] })).toBe(400);
-		expect((await SELF.fetch("http://example.com/api/similar-groups")).status).toBe(403);
-		expect(await post("/similar-groups/scan", {})).toBe(200); // 没有 Vectorize：什么都不查
-		// 线上 Worker 的测试配置里没有 Vectorize：相似照片返回空，不报错
-		await seed_(1);
-		await saveFingerprint(env, aid(1), fp(randomHash(), randomVec()));
-		const res = await SELF.fetch(`http://example.com/api/assets/${aid(1)}/similar`, { headers: await authHeaders() });
-		expect(await res.json()).toMatchObject({ items: [], unavailable: true });
 	});
 });

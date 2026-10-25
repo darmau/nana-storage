@@ -231,14 +231,14 @@ describe("fingerprints", () => {
 		await guardStub(env).reset();
 		fake.skipFingerprint.length = 0;
 	});
-	const fpRow = (id: string) => env.DB.prepare("SELECT phash, model, indexed FROM asset_fp WHERE asset_id = ?").bind(id).first();
+	const fpRow = (id: string) => env.DB.prepare("SELECT phash, model FROM asset_fp WHERE asset_id = ?").bind(id).first();
 	const addJob = async (id: string, assetId: string, kind: string) =>
 		env.DB.prepare("INSERT INTO jobs (id, asset_id, kind, status, attempts, updated_at) VALUES (?, ?, ?, 'pending', 0, 0)").bind(id, assetId, kind).run();
 
 	it("stores the fingerprint from the single derive call (no extra container call)", async () => {
 		const p = await seedAsset("photo", { MIMEType: "image/jpeg" });
 		await handleJobMessage({ jobId: p.jobId }, env);
-		expect(await fpRow(p.assetId)).toEqual({ phash: FP.phash, model: FP_MODEL_VER, indexed: 0 }); // 测试里没有 Vectorize
+		expect(await fpRow(p.assetId)).toEqual({ phash: FP.phash, model: FP_MODEL_VER });
 		expect(fake.skipFingerprint).toEqual([undefined]);
 	});
 

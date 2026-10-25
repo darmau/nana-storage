@@ -6,17 +6,16 @@ import { api, errorText } from "../api";
 import { fmtNumber, t } from "../i18n";
 import { LibraryList } from "../library/LibraryList";
 import { formatBytes } from "../timeline/format";
-import { IconAlert, IconChevronRight, IconCompress, IconDuplicate, IconInfo, IconLookalike } from "../ui/icons";
+import { IconAlert, IconChevronRight, IconCompress, IconDuplicate, IconInfo } from "../ui/icons";
 import { useDocumentTitle } from "../ui/title";
 
 /**
- * 整理：重复照片、相似照片、原图压缩。桌面端是侧边栏里的一项（/organize，这一页列出三个入口）；
- * 移动端没有单独的标签，三个入口平铺在资料库首页（LibraryHome 用同一份 ORGANIZE_ITEMS）。
+ * 整理：重复照片、原图压缩。桌面端是侧边栏里的一项（/organize，这一页列出两个入口）；
+ * 移动端没有单独的标签，两个入口平铺在资料库首页（LibraryHome 用同一份 ORGANIZE_ITEMS）。
  */
 
 export const ORGANIZE_ITEMS = [
 	{ to: "/duplicates", icon: IconDuplicate, title: () => t.duplicates.title, sub: () => t.organize.duplicatesSub },
-	{ to: "/similar-groups", icon: IconLookalike, title: () => t.lookalike.title, sub: () => t.organize.lookalikeSub },
 	{ to: "/compress", icon: IconCompress, title: () => t.compress.title, sub: () => t.organize.compressSub },
 ] as const;
 

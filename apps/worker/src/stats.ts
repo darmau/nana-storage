@@ -45,7 +45,7 @@ export async function usageStats(env: Env, now = Date.now()): Promise<UsageStats
 				 GROUP BY month ORDER BY month`,
 			).bind(growthStart),
 			env.DB.prepare(
-				`SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes, (SELECT COUNT(*) FROM asset_fp WHERE indexed = 1) AS vectors FROM uploads`,
+				`SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes, (SELECT COUNT(*) FROM faces WHERE indexed = 1) AS vectors FROM uploads`,
 			),
 			env.DB.prepare("SELECT bytes, photos, videos FROM storage_totals WHERE id = 1"),
 		]),

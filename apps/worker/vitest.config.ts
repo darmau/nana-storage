@@ -12,7 +12,7 @@ import { defineConfig } from "vitest/config";
  */
 function testWranglerConfig(): string {
 	const { rawConfig } = experimental_readRawConfig({ config: path.join(import.meta.dirname, "wrangler.jsonc") });
-	// Vectorize 没有本地模拟，测试里用内存假实现（test/similar.test.ts）。
+	// Vectorize 没有本地模拟，测试里用内存假实现（test/fake-index.ts）。
 	const { vectorize: _vectorize, ...rest } = rawConfig;
 	const config = { ...rest, queues: { ...rawConfig.queues, consumers: [] } };
 	const out = path.join(import.meta.dirname, "wrangler.test.generated.json");

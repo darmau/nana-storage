@@ -33,7 +33,7 @@ It asks for the domain and the owner email, then:
 - Creates the resources, skipping any that already exist:
   - D1 `nana-db`, R2 `nana-photos`, KV `nana-kv`;
   - queues `nana-jobs` and `nana-jobs-dlq`;
-  - two Vectorize indexes, `nana-embed` and `nana-faces` (512 dimensions, cosine).
+  - a Vectorize index, `nana-faces` (512 dimensions, cosine).
 - Applies the D1 migrations.
 - Creates the Zero Trust Access application, using an API token you paste in for this run only. The token is not stored, and you can delete it afterwards. The application:
   - covers the whole hostname and allows only your email;
@@ -101,7 +101,7 @@ Billing → Billable usage → Budget alerts: set alerts at $20, $50 and $100. A
 - [ ] Upload a few photos: Settings shows the jobs completing, and the photos appear in the timeline.
 - [ ] "Container runtime" in Settings grows reasonably; note how long containers take to stop once idle (locally they stop as soon as a job ends).
 - [ ] The map page shows the base map and photo markers.
-- [ ] Newly uploaded photos show similar photos in the viewer's info panel, and "Explore › Themes" and the duplicates page work.
+- [ ] "Explore › Themes" and the duplicates page work.
 - [ ] The Workers logs contain no `vectorize_query_failed` / `vectorize_upsert_failed`.
 
 ## Updating

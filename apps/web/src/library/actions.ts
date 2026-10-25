@@ -15,7 +15,7 @@ export type BatchAction =
 
 /** 资料库里任何数据变了以后，刷新所有相关列表。 */
 export function invalidateLibrary(qc: QueryClient) {
-	for (const key of ["timeline", "list", "asset", "folders", "albums", "smart-sets", "similar", "duplicates", "similar-groups", "compress", "people", "storage-summary"])
+	for (const key of ["timeline", "list", "asset", "folders", "albums", "smart-sets", "duplicates", "compress", "people", "storage-summary"])
 		void qc.invalidateQueries({ queryKey: [key] });
 }
 
@@ -103,19 +103,6 @@ export async function setSmartSetFolders(qc: QueryClient, setId: string, folders
 	});
 	invalidateLibrary(qc);
 	return res;
-}
-
-/** 相似照片“暂不处理”：这些照片所在的组排到队列末尾。 */
-export async function snoozeSimilar(qc: QueryClient, ids: string[]) {
-	const res = await api<{ snoozed: number }>("/similar-groups/snooze", { method: "POST", json: { ids } });
-	void qc.invalidateQueries({ queryKey: ["similar-groups"] });
-	return res;
-}
-
-/** 一组相似照片移到回收站 / 归档（或撤销）之后，让服务端重算它们在待整理队列里的位置。 */
-export async function recountSimilar(qc: QueryClient, ids: string[]) {
-	await api<{ ok: true }>("/similar-groups/recount", { method: "POST", json: { ids } });
-	void qc.invalidateQueries({ queryKey: ["similar-groups"] });
 }
 
 /** 标记为“不是重复”（pivot：只有这张和其他几张不是），undo 为 true 时撤销同样的标记。 */
