@@ -274,9 +274,12 @@ interface NeighborRow {
 	assigned: number;
 }
 
-/** Vectorize 里和这个向量最像的脸（相似度至少 minScore），按相似度从高到低。 */
+/**
+ * Vectorize 里和这个向量最像的脸（相似度至少 minScore），按相似度从高到低。
+ * 带 returnValues 才是精确的余弦（见 similar.ts 的 nearest()），topK 最多 50。
+ */
 async function similarFaces(index: VectorizeIndex, vector: ArrayLike<number>, topK: number, minScore: number) {
-	const { matches } = await index.query(Array.from(vector), { topK, returnValues: false, returnMetadata: "none" });
+	const { matches } = await index.query(Array.from(vector), { topK: Math.min(topK, 50), returnValues: true, returnMetadata: "none" });
 	return matches.filter((m) => m.score >= minScore && ID.safeParse(m.id).success);
 }
 

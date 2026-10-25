@@ -351,7 +351,9 @@ interface Neighbor {
 }
 
 /**
- * 近邻查询：Vectorize 取前 topK 个（不返回值和元数据，topK 最多 100），再用 D1 过滤掉不可见的条目。
+ * 近邻查询：Vectorize 取前 topK 个（topK 最多 50），再用 D1 过滤掉不可见的条目。
+ * 必须带 returnValues：不带时 Vectorize 返回的是量化后的近似分数，CLIP 向量上整体压低很多
+ * （线上实测照片和自己的相似度只有 0.77，0.94 的近邻只有 0.70），和固定阈值比较就一个都选不出来。
  * 返回 null 表示没有索引可用。
  */
 export async function nearest(env: Env, vector: ArrayLike<number>, topK: number, minScore: number): Promise<Neighbor[] | null> {
@@ -359,7 +361,7 @@ export async function nearest(env: Env, vector: ArrayLike<number>, topK: number,
 	if (!index) return null;
 	let matches: { id: string; score: number }[];
 	try {
-		({ matches } = await index.query(Array.from(vector), { topK: Math.min(topK, 100), returnValues: false, returnMetadata: "none" }));
+		({ matches } = await index.query(Array.from(vector), { topK: Math.min(topK, 50), returnValues: true, returnMetadata: "none" }));
 	} catch (e) {
 		console.warn(JSON.stringify({ event: "vectorize_query_failed", error: String(e).slice(0, 300) }));
 		return null;
