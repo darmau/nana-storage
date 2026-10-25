@@ -195,14 +195,16 @@ export const SIMILAR_SCAN_SETTLE_MS = 10 * 60_000;
 /**
  * 查近邻：每张 1 次 Vectorize 查询，D1 按批（每批几十张一次 batch）读写，同时补上这张照片的重复照片候选对。
  * 每张照片只查一次（指纹重写后再查一次）：
- *  - 每小时 Cron 最多 SIMILAR_SCAN_CRON_BATCH 张，熔断时跳过，不会自我触发。最坏每天 24 × 300 = 7200 次查询（约 370 万查询维度）。
+ *  - 每小时 Cron 最多 SIMILAR_SCAN_CRON_BATCH 张，熔断时跳过，不会自我触发。最坏每天 24 × 600 = 14400 次查询（约 740 万查询维度），
+ *    只在有没查过的照片时才有（每张只查一次，总量只取决于照片数）。
  *  - 打开“相似照片”页面时，还有没查过的就由页面一批接一批地请求，每次 SIMILAR_SCAN_BATCH 张，每次打开最多 SIMILAR_SCAN_CALLS 次
- *    （40 万张），页面关掉或切到后台就停，出错即停。
+ *    （120 万张）；切到后台暂停、回到前台继续；出错退避重试，连续 SIMILAR_SCAN_RETRIES 次失败才停。
  *  - 30 万张的库补完一次：约 1.5 亿查询维度（每月含 5000 万，超出约 $1）；D1 约 3000 万行读取、几百万行写入，都在每月的额度内。
  */
-export const SIMILAR_SCAN_CRON_BATCH = 300;
-export const SIMILAR_SCAN_BATCH = 100;
+export const SIMILAR_SCAN_CRON_BATCH = 600;
+export const SIMILAR_SCAN_BATCH = 300;
 export const SIMILAR_SCAN_CALLS = 4000;
+export const SIMILAR_SCAN_RETRIES = 6;
 /** 一次“暂不处理”最多涉及的照片数。 */
 export const SIMILAR_SNOOZE_MAX = 200;
 

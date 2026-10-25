@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { SIMILAR_SCAN_CALLS } from "@nana/shared";
+import { SIMILAR_SCAN_CALLS, SIMILAR_SCAN_RETRIES } from "@nana/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorText } from "../api";
 import { t } from "../i18n";
@@ -64,20 +64,53 @@ export function SimilarGroupsPage() {
 	useEffect(() => {
 		if (!needsScan) return;
 		let stopped = false;
+		// 等待回到前台的 pause() 的 resolve（页面变成可见时放行）
+		let release = () => {};
+		const onVisible = () => {
+			if (!document.hidden) release();
+		};
+		document.addEventListener("visibilitychange", onVisible);
+		// 等 ms 毫秒（不传时等到页面回到前台）
+		const pause = (ms?: number) =>
+			new Promise<void>((resolve) => {
+				const timer = ms === undefined ? undefined : setTimeout(resolve, ms);
+				release = ms === undefined ? resolve : () => {};
+				cancel = () => {
+					clearTimeout(timer);
+					resolve();
+				};
+				if (ms === undefined && !document.hidden) resolve();
+			});
+		// 同一时间最多一个 pause()，cancel 只放行当前这个
+		let cancel = () => {};
 		void (async () => {
 			let pending = data!.pending;
 			setScan({ running: true, pending });
-			try {
-				for (let i = 0; i < SIMILAR_SCAN_CALLS && !stopped && !document.hidden; i++) {
-					const r = await api<{ scanned: number }>("/similar-groups/scan", { method: "POST" });
-					if (stopped) return;
+			// 每次打开最多 SIMILAR_SCAN_CALLS 次请求（包括重试）；连续失败 SIMILAR_SCAN_RETRIES 次就停，
+			// 下次打开页面或每小时的 Cron 会接着比较
+			let failures = 0;
+			for (let i = 0; i < SIMILAR_SCAN_CALLS && !stopped; i++) {
+				// 切到后台时暂停，回到前台继续（不轮询）
+				if (document.hidden) await pause();
+				if (stopped) return;
+				let r: { scanned: number; failed?: boolean } | null = null;
+				try {
+					r = await api<{ scanned: number; failed?: boolean }>("/similar-groups/scan", { method: "POST" });
+				} catch {
+					// 退避后重试
+				}
+				if (stopped) return;
+				if (r) {
 					pending = Math.max(0, pending - r.scanned);
 					setScan({ running: true, pending });
-					if (!r.scanned) break;
+					if (!r.scanned && !r.failed) break;
 					if (i % REFRESH_EVERY === REFRESH_EVERY - 1) void qc.invalidateQueries({ queryKey: ["similar-groups"] });
 				}
-			} catch {
-				// 出错就停，下次打开页面或每小时的 Cron 会接着比较
+				if (r && !r.failed) failures = 0;
+				else {
+					if (++failures >= SIMILAR_SCAN_RETRIES) break;
+					await pause(Math.min(30_000, 2000 * 2 ** (failures - 1)));
+				}
 			}
 			if (stopped) return;
 			setScan((s) => s && { ...s, running: false });
@@ -85,6 +118,8 @@ export function SimilarGroupsPage() {
 		})();
 		return () => {
 			stopped = true;
+			document.removeEventListener("visibilitychange", onVisible);
+			cancel();
 		};
 		// data 只用来取初始的剩余张数；重新分组后不重新开始
 		// eslint-disable-next-line react-hooks/exhaustive-deps

@@ -49,7 +49,7 @@ export const similarGroups = new Hono<Bindings>();
 
 const ID = z.string().regex(/^[0-9A-Z]{26}$/);
 /** 同时进行的 Vectorize 查询数。 */
-const QUERY_CONCURRENCY = 10;
+const QUERY_CONCURRENCY = 25;
 /** 每次读多少个候选中心。 */
 const CENTER_BATCH = 100;
 /** json_each 一次展开多少个 id（整批作为一个 JSON 文本参数，D1 单条语句最多 100 个参数）。 */
@@ -101,7 +101,12 @@ async function reviveParked(env: Env) {
  * 返回这次查完的张数。
  */
 export async function scanSimilar(env: Env, limit: number, now = Date.now()): Promise<number> {
-	if (!vectorIndex(env) || (await guardStub(env).isTripped())) return 0;
+	return (await scanBatch(env, limit, now)).scanned;
+}
+
+/** 同 scanSimilar；failed：Vectorize 出过错（这一批没查完，剩下的可以稍后再试）。 */
+async function scanBatch(env: Env, limit: number, now = Date.now()): Promise<{ scanned: number; failed: boolean }> {
+	if (!vectorIndex(env) || (await guardStub(env).isTripped())) return { scanned: 0, failed: false };
 	const { results } = await env.DB.prepare(
 		`SELECT asset_id, phash, embedding, updated_at FROM asset_fp INDEXED BY asset_fp_similar_pending
 		 WHERE similar_at IS NULL AND indexed = 1 AND updated_at <= ? AND model = ? ORDER BY updated_at LIMIT ?`,
@@ -109,25 +114,29 @@ export async function scanSimilar(env: Env, limit: number, now = Date.now()): Pr
 		.bind(now - SIMILAR_SCAN_SETTLE_MS, FP_MODEL_VER, limit)
 		.all<{ asset_id: string; phash: string; embedding: ArrayBuffer; updated_at: number }>();
 	const done: { id: string; phash: string; embedding: Int8Array; updatedAt: number; near: [string, number][] }[] = [];
-	for (let i = 0; i < results.length; i += QUERY_CONCURRENCY) {
-		const chunk = results.slice(i, i + QUERY_CONCURRENCY).map((r) => ({ ...r, vector: asInt8(r.embedding) }));
-		const found = await Promise.all(chunk.map((r) => nearest(env, r.vector, SIMILAR_GROUP_TOP_K + 1, SIMILAR_GROUP_MIN_COSINE)));
-		let failed = false;
-		chunk.forEach((r, k) => {
-			const near = found[k];
-			if (!near) failed = true;
-			else
-				done.push({
-					id: r.asset_id,
-					phash: r.phash,
-					embedding: r.vector,
-					updatedAt: r.updated_at,
-					near: near.filter((n) => n.id !== r.asset_id).map((n) => [n.id, n.score]),
-				});
-		});
-		if (failed) break;
-	}
-	if (!done.length) return 0;
+	// QUERY_CONCURRENCY 个查询并行，一个结束就补下一个（不等整轮）；出错之后不再发新的查询
+	let next = 0;
+	let failed = false;
+	const lane = async () => {
+		while (!failed && next < results.length) {
+			const r = results[next++]!;
+			const vector = asInt8(r.embedding);
+			const near = await nearest(env, vector, SIMILAR_GROUP_TOP_K + 1, SIMILAR_GROUP_MIN_COSINE);
+			if (!near) {
+				failed = true;
+				return;
+			}
+			done.push({
+				id: r.asset_id,
+				phash: r.phash,
+				embedding: vector,
+				updatedAt: r.updated_at,
+				near: near.filter((n) => n.id !== r.asset_id).map((n) => [n.id, n.score]),
+			});
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(QUERY_CONCURRENCY, results.length) }, lane));
+	if (!done.length) return { scanned: 0, failed };
 	await updateDuplicatePairs(env, done);
 	const writes = done.flatMap((r) => [
 		// 只写还存在的条目（索引里可能残留已删除照片的向量）
@@ -140,11 +149,17 @@ export async function scanSimilar(env: Env, limit: number, now = Date.now()): Pr
 		// 期间指纹被重写过的不标记，下次重新查
 		env.DB.prepare("UPDATE asset_fp SET similar_at = ? WHERE asset_id = ? AND updated_at = ?").bind(now, r.id, r.updatedAt),
 	]);
-	// 这一批和它们的近邻的相似照片数（新的照片对可能让清零过的中心重新进队列）
-	writes.push(recountStatement(env, [...new Set(done.flatMap((r) => [r.id, ...r.near.map(([id]) => id)]))]));
-	for (let i = 0; i < writes.length; i += 50) await env.DB.batch(writes.slice(i, i + 50));
+	// 各批互不依赖（INSERT OR IGNORE、按条目各自 UPDATE），一起发，不一批等一批
+	const batches: Promise<unknown>[] = [];
+	for (let i = 0; i < writes.length; i += 50) batches.push(env.DB.batch(writes.slice(i, i + 50)));
+	await Promise.all(batches);
+	// 照片对都写完之后，重算这一批和它们的近邻的相似照片数（新的照片对可能让清零过的中心重新进队列）
+	const touched = [...new Set(done.flatMap((r) => [r.id, ...r.near.map(([id]) => id)]))];
+	const recount: D1PreparedStatement[] = [];
+	for (let i = 0; i < touched.length; i += JSON_IDS) recount.push(recountStatement(env, touched.slice(i, i + JSON_IDS)));
+	await env.DB.batch(recount);
 	console.log(JSON.stringify({ event: "similar_scanned", count: done.length }));
-	return done.length;
+	return { scanned: done.length, failed };
 }
 
 // ---------------------------------------------------------------- 待整理队列
@@ -323,8 +338,11 @@ similarGroups.get("/similar-groups", async (c) => {
 	});
 });
 
-/** POST /api/similar-groups/scan：页面分批补查（每次 SIMILAR_SCAN_BATCH 张），前端在有剩余时继续请求，次数有上限。 */
-similarGroups.post("/similar-groups/scan", async (c) => c.json({ scanned: await scanSimilar(c.env, SIMILAR_SCAN_BATCH) }));
+/**
+ * POST /api/similar-groups/scan：页面分批补查（每次 SIMILAR_SCAN_BATCH 张），前端在有剩余时继续请求，次数有上限。
+ * failed：Vectorize 出过错，前端退避后再试（次数有上限）；scanned = 0 且没有 failed 表示暂时没有能查的了。
+ */
+similarGroups.post("/similar-groups/scan", async (c) => c.json(await scanBatch(c.env, SIMILAR_SCAN_BATCH)));
 
 const Ids = z.object({ ids: z.array(ID).min(1).max(SIMILAR_SNOOZE_MAX) });
 

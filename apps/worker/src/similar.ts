@@ -205,8 +205,10 @@ export async function updateDuplicatePairs(env: Env, rows: { id: string; phash: 
 				 WHERE (f.b0 = ? OR f.b1 = ? OR f.b2 = ? OR f.b3 = ? OR f.b4 = ?) AND f.asset_id != ? LIMIT ?`,
 			).bind(...phashBands(r.phash), r.id, DUPLICATE_NEIGHBOR_MAX),
 		]);
-		const results: D1Result<{ id: string; phash: string; kind: string }>[] = [];
-		for (let i = 0; i < reads.length; i += 50) results.push(...(await env.DB.batch<{ id: string; phash: string; kind: string }>(reads.slice(i, i + 50))));
+		// 只读，各批一起发；下面的写入有先后（先删这张的旧照片对再插），仍按顺序一批一批写
+		const chunks: Promise<D1Result<{ id: string; phash: string; kind: string }>[]>[] = [];
+		for (let i = 0; i < reads.length; i += 50) chunks.push(env.DB.batch<{ id: string; phash: string; kind: string }>(reads.slice(i, i + 50)));
+		const results = (await Promise.all(chunks)).flat();
 		const close = rows.map((r, k) => {
 			const isVideo = results[2 * k]!.results[0]?.kind === "video";
 			return results[2 * k + 1]!.results.filter((n) => (n.kind === "video") === isVideo && hamming(n.phash, r.phash) <= DUPLICATE_MAX_HAMMING);
