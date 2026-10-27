@@ -149,7 +149,6 @@ export function BatchMetaEditor({
 				</div>
 			)}
 
-			<p className="mt-4 text-xs text-muted">{t.meta.lockedHint}</p>
 			<div className="mt-4 flex justify-end gap-2">
 				<button className="btn" onClick={onClose}>
 					{t.common.cancel}

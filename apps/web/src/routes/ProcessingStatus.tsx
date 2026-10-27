@@ -151,7 +151,7 @@ export function ProcessingStatus() {
 						{t.processing.summary(c!.running, c!.pending)}
 						{c!.retrying > 0 && t.processing.retryingTag(c!.retrying)}
 						{c!.stuck > 0 && t.processing.stuckTag(c!.stuck)}
-						{autoStopped ? t.processing.autoStopped : t.processing.autoRefreshing}
+						{autoStopped && t.processing.autoStopped}
 					</p>
 					{(c!.pending > 0 || c!.stuck > 0) && !guard.data?.tripped && (
 						<div className={`flex flex-wrap items-center gap-2 rounded-md px-3 py-2 ${stalled ? "bg-notice" : "bg-surface"}`}>
