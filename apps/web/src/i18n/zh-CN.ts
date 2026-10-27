@@ -341,6 +341,7 @@ export const zhCN = {
 		camera: "相机",
 		lens: "镜头",
 		folder: "文件夹",
+		move: "移动",
 		type: "类型",
 		saveFailed: (error: string) => `保存失败：${error}`,
 		files: "文件",

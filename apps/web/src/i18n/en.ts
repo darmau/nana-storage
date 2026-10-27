@@ -343,6 +343,7 @@ export const en: Messages = {
 		camera: "Camera",
 		lens: "Lens",
 		folder: "Folder",
+		move: "Move",
 		type: "Type",
 		saveFailed: (error: string) => `Couldn't save: ${error}`,
 		files: "Files",

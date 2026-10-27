@@ -554,7 +554,7 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 				)}
 				{detail.error && <p className="absolute bottom-16 left-4 text-sm text-danger">{t.common.loadFailed(errorText(detail.error))}</p>}
 			</div>
-			{showInfo && !immersive && panelAsset && <InfoPanel asset={panelAsset} onClose={() => setShowInfo(false)} />}
+			{showInfo && !immersive && panelAsset && <InfoPanel asset={panelAsset} onClose={() => setShowInfo(false)} onMoved={requestClose} />}
 			{editing && detail.data && (
 				<Editor
 					source={editSource(detail.data)}

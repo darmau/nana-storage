@@ -4,7 +4,8 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import { t } from "../i18n";
-import { invalidateLibrary } from "../library/actions";
+import { batch, invalidateLibrary } from "../library/actions";
+import { FolderPicker } from "../library/Pickers";
 import { formatBytes, formatDuration, formatTakenAt } from "../timeline/format";
 import { downloadUrl } from "./media";
 import { type AssetFace, assetFacesQuery, FaceAvatar, invalidatePeople, personName, renamePerson } from "../people/model";
@@ -55,9 +56,11 @@ export function parseLatLon(text: string): { lat: number; lon: number } | null {
 const field = "field w-full bg-bg";
 const small = "inline-flex h-7 items-center rounded-full border border-border px-3 text-xs font-medium hover:bg-surface disabled:opacity-50";
 
-export function InfoPanel({ asset, onClose }: { asset: AssetDetail; onClose: () => void }) {
+/** onMoved：移到别的文件夹之后（照片可能已经不在当前列表里），由查看器关闭自己回到之前的页面。 */
+export function InfoPanel({ asset, onClose, onMoved }: { asset: AssetDetail; onClose: () => void; onMoved: () => void }) {
 	const qc = useQueryClient();
 	const [editing, setEditing] = useState<"time" | "location" | null>(null);
+	const [moving, setMoving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 
@@ -73,6 +76,23 @@ export function InfoPanel({ asset, onClose }: { asset: AssetDetail; onClose: () 
 		} finally {
 			setSaving(false);
 		}
+	};
+
+	const folderId = asset.folder_path?.at(-1)?.id ?? null;
+	const move = async (target: string | null) => {
+		setMoving(false);
+		if (target === folderId) return;
+		setSaving(true);
+		setError(null);
+		try {
+			await batch(qc, [asset.id], { action: "move", folderId: target });
+		} catch (e) {
+			setError(errorText(e));
+			setSaving(false);
+			return;
+		}
+		setSaving(false);
+		onMoved();
 	};
 
 	const sources = asset.files.filter((f) => ["original", "raw", "live_video"].includes(f.role));
@@ -149,10 +169,16 @@ export function InfoPanel({ asset, onClose }: { asset: AssetDetail; onClose: () 
 				<div className={row}>
 					<IconFolder className={rowIcon} />
 					<div className="min-w-0 flex-1">
-						<dt className="text-xs text-muted">{t.info.folder}</dt>
+						<dt className="flex items-center justify-between text-xs text-muted">
+							{t.info.folder}
+							<button className={small} disabled={saving} onClick={() => setMoving(true)}>
+								{t.info.move}
+							</button>
+						</dt>
 						<dd className="mt-0.5 break-words">
 							<FolderPath path={asset.folder_path ?? []} />
 						</dd>
+						{moving && <FolderPicker initial={folderId} onClose={() => setMoving(false)} onPick={(f) => void move(f)} />}
 					</div>
 				</div>
 
