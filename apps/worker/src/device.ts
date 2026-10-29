@@ -22,7 +22,7 @@ import {
 import { compressedKey, compressible } from "./compress";
 import { DERIVED_FILES, derivedKey } from "./derived";
 import { guardStub } from "./guard";
-import { CLAIMABLE_SQL, requeueAfterDevice, settleJob, type JobRow } from "./jobs";
+import { CLAIMABLE_SQL, DEVICE_KINDS, requeueAfterDevice, settleJob, type JobRow } from "./jobs";
 import { deriveTargets, previewEdgeOf, processorHandlers, type ProcessorLike } from "./process";
 import type { DeriveInput } from "./processor";
 
@@ -40,6 +40,8 @@ import type { DeriveInput } from "./processor";
  *     handler 实际要的参数和计划不一致（比如期间被旋转过）就当作失败，任务退回 pending 再处理一次，不会写错数据。
  *  4. 设备交还云端（detach）或者消失（租约 DEVICE_LEASE_MS 后失效）后，新消息回到容器；租约期间被 ack 掉的任务
  *     在交还时补发一批，其余由每小时 Cron 补发（requeueAfterDevice）。
+ *
+ * 拼接 / 切割（compose 任务）设备不认领，设备接管时也由容器处理（jobs.ts 的 DEVICE_KINDS）。
  *
  * 设备界面的浏览和上传（apps/device）直接用和浏览器相同的接口（/api/folders、/api/a、/api/uploads），这里不需要专门的接口。
  *
@@ -418,9 +420,11 @@ export const device = new Hono<AppEnv>()
 		if (max === 0) return c.json({ until: lease.until, jobs: [] });
 
 		const now = Date.now();
+		// 只认领设备会做的种类（拼接 / 切割只在容器里做，见 jobs.ts 的 DEVICE_KINDS）
+		const kinds = `kind IN (${[...DEVICE_KINDS].map((k) => `'${k}'`).join(", ")})`;
 		const { results: claimed } = await env.DB.prepare(
 			`UPDATE jobs SET status = 'running', attempts = attempts + 1, started_at = ?, updated_at = ?
-			 WHERE id IN (SELECT id FROM jobs WHERE ${CLAIMABLE_SQL} ORDER BY id LIMIT ?) AND ${CLAIMABLE_SQL}
+			 WHERE id IN (SELECT id FROM jobs WHERE ${CLAIMABLE_SQL} AND ${kinds} ORDER BY id LIMIT ?) AND ${CLAIMABLE_SQL}
 			 RETURNING id, asset_id, kind, status, attempts, started_at`,
 		)
 			.bind(now, now, MAX_JOB_ATTEMPTS, now - JOB_STALE_MS, max, MAX_JOB_ATTEMPTS, now - JOB_STALE_MS)

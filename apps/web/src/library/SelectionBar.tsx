@@ -21,10 +21,24 @@ import {
 	IconPhotos,
 	IconRestore,
 	IconSimilar,
+	IconSplit,
+	IconStitch,
 	IconTrash,
 } from "../ui/icons";
-import { addToAlbum, batch, compressOriginals, createSmartSet, downloadZip, invalidateLibrary, removeFromAlbum, setSmartSetExamples } from "./actions";
+import {
+	addToAlbum,
+	batch,
+	compressOriginals,
+	createSmartSet,
+	downloadZip,
+	invalidateLibrary,
+	removeFromAlbum,
+	setSmartSetExamples,
+	splitPhoto,
+	stitchPhotos,
+} from "./actions";
 import { BatchMetaEditor } from "./BatchMetaEditor";
+import { SplitDialog, StitchDialog } from "./ComposeDialogs";
 import { AlbumPicker, FolderPicker, SmartSetPicker } from "./Pickers";
 import { MAX_SELECTION, useSelection } from "./selection";
 import { reassignPerson, removeFromPerson } from "../people/model";
@@ -108,7 +122,7 @@ interface Actions {
 	download: (ids: string[]) => void;
 }
 
-type DialogKind = "album" | "folder" | "meta" | "smartSet" | "person";
+type DialogKind = "album" | "folder" | "meta" | "smartSet" | "person" | "compose";
 
 const Ctx = createContext<Actions | null>(null);
 
@@ -223,6 +237,26 @@ export function AssetActionsProvider({ context, children }: { context: BarContex
 					}}
 				/>
 			)}
+			{dialog?.kind === "compose" && dialog.ids.length > 1 && (
+				<StitchDialog
+					ids={dialog.ids}
+					onClose={() => setDialog(null)}
+					onConfirm={(ids, direction) => {
+						setDialog(null);
+						void run(() => stitchPhotos(qc, ids, direction), t.compose.started);
+					}}
+				/>
+			)}
+			{dialog?.kind === "compose" && dialog.ids.length === 1 && (
+				<SplitDialog
+					id={dialog.ids[0]!}
+					onClose={() => setDialog(null)}
+					onConfirm={(direction, cuts) => {
+						setDialog(null);
+						void run(() => splitPhoto(qc, dialog.ids[0]!, direction, cuts), t.compose.started);
+					}}
+				/>
+			)}
 			{dialog?.kind === "meta" && (
 				<BatchMetaEditor
 					count={dialog.ids.length}
@@ -332,6 +366,7 @@ export function useAssetMenu() {
 			{ label: t.actions.moveToFolderMenu, icon: <IconFolderMove size={18} />, onSelect: () => pick("folder", ids) },
 			{ label: t.actions.addToTopicMenu, icon: <IconSimilar size={18} />, onSelect: () => pick("smartSet", ids) },
 			{ label: t.actions.editMetaMenu, icon: <IconEdit size={18} />, onSelect: () => pick("meta", ids) },
+			composeItem(ids, pick, true),
 			{ label: multi ? t.actions.download : t.actions.downloadOriginal, icon: <IconDownload size={18} />, onSelect: () => download(ids) },
 		];
 		if (context.kind === "album") {
@@ -387,11 +422,13 @@ export function SelectionBar() {
 	}));
 	// 归档页里“取消归档”是主要操作，手机上也直接显示
 	const archiveInBar = context.kind === "archive";
+	const composeAction = composeItem(ids, pick, false);
 	const more: MenuItem[] = [
 		...(archiveInBar ? [] : archive.map((a) => ({ label: a.label, icon: <IconArchive size={18} />, onSelect: a.onSelect }))),
 		{ label: t.actions.moveToFolder, icon: <IconFolderMove size={18} />, onSelect: () => pick("folder", ids) },
 		{ label: t.actions.addToTopic, icon: <IconSimilar size={18} />, onSelect: () => pick("smartSet", ids) },
 		{ label: t.actions.editMeta, icon: <IconEdit size={18} />, onSelect: () => pick("meta", ids) },
+		composeAction,
 	];
 	if (context.kind === "album")
 		more.push({ label: t.actions.removeFromAlbum, icon: <IconClose size={18} />, onSelect: () => void run(() => removeFromAlbum(qc, context.albumId, ids)) });
@@ -490,6 +527,10 @@ export function SelectionBar() {
 							<IconEdit />
 							<span className={label}>{t.actions.timeAndPlace}</span>
 						</button>
+						<button className={`${btn} ${desktopOnly}`} disabled={busy} onClick={composeAction.onSelect}>
+							{ids.length > 1 ? <IconStitch /> : <IconSplit />}
+							<span className={label}>{ids.length > 1 ? t.compose.stitch : t.compose.split}</span>
+						</button>
 						<button className={btn} disabled={busy} onClick={() => download(ids)}>
 							<IconDownload />
 							<span className={label}>{t.actions.download}</span>
@@ -526,6 +567,16 @@ export function SelectionBar() {
 			</div>
 		</div>
 	);
+}
+
+/** 选了几张时是“拼接”，只选了一张时是“切割”（打开 ComposeDialogs 里的弹窗）。menu：右键菜单的文案（带省略号）。 */
+function composeItem(ids: string[], pick: Actions["pick"], menu: boolean): { label: string; icon: React.ReactNode; onSelect: () => void } {
+	const stitch = ids.length > 1;
+	return {
+		label: stitch ? (menu ? t.compose.stitchMenu : t.compose.stitch) : menu ? t.compose.splitMenu : t.compose.split,
+		icon: stitch ? <IconStitch size={18} /> : <IconSplit size={18} />,
+		onSelect: () => pick("compose", ids),
+	};
 }
 
 /** 主题里标记之后的提示：移出样本没有提示，其余提示其中和分类器矛盾的张数。 */

@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { COMPRESS_BATCH_MAX } from "@nana/shared";
+import { COMPRESS_BATCH_MAX, type ComposeDirection } from "@nana/shared";
 import { api } from "../api";
+import { armLibrarySync } from "./sync";
 
 export type BatchAction =
 	| { action: "favorite"; value: boolean }
@@ -39,6 +40,28 @@ export async function compressOriginals(qc: QueryClient, ids: string[], maxPixel
 	void qc.invalidateQueries({ queryKey: ["list", "compress"] });
 	void qc.invalidateQueries({ queryKey: ["jobs"] });
 	return { queued, skipped };
+}
+
+/**
+ * 拼接 / 切割：服务端新建条目和任务，处理好之前新照片看不到；全部处理好之后原照片移进回收站。
+ * 开始同步检查（sync.ts），处理好时列表自己更新。
+ */
+export async function stitchPhotos(qc: QueryClient, ids: string[], direction: ComposeDirection) {
+	const res = await api<{ assetIds: string[] }>("/compose/stitch", { method: "POST", json: { ids, direction } });
+	afterCompose(qc);
+	return res;
+}
+
+export async function splitPhoto(qc: QueryClient, id: string, direction: ComposeDirection, cuts: number[]) {
+	const res = await api<{ assetIds: string[] }>("/compose/split", { method: "POST", json: { id, direction, cuts } });
+	afterCompose(qc);
+	return res;
+}
+
+function afterCompose(qc: QueryClient) {
+	invalidateLibrary(qc);
+	void qc.invalidateQueries({ queryKey: ["jobs"] });
+	armLibrarySync();
 }
 
 export async function addToAlbum(qc: QueryClient, albumId: string, ids: string[]) {

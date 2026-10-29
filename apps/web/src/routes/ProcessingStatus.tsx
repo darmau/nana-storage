@@ -6,7 +6,7 @@ import { invalidateLibrary } from "../library/actions";
 import { fmtNumber, t } from "../i18n";
 import { formatBytes } from "../timeline/format";
 import { thumbUrl } from "../timeline/types";
-import { IconFile, IconPlay, IconRotate } from "../ui/icons";
+import { IconFile, IconPlay, IconRotate, IconStitch } from "../ui/icons";
 import { duration } from "./settings/shared";
 
 export interface ActiveJob {
@@ -243,6 +243,8 @@ export function JobThumb({ job }: { job: Pick<ActiveJob, "asset_id" | "asset_sta
 				<img src={thumbUrl(job.asset_id, job.derived_rev)} alt="" className="h-full w-full object-cover" onError={() => setFailed(true)} />
 			) : job.kind === "rotate" ? (
 				<IconRotate size={18} />
+			) : job.kind === "compose" ? (
+				<IconStitch size={18} />
 			) : job.asset_kind === "video" ? (
 				<IconPlay size={16} />
 			) : (

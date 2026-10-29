@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
-import { compressTask, deriveTask, metaTask, parseCrop, saveInput, transcodeTask } from "./lib.mjs";
+import { composeTask, compressTask, deriveTask, metaTask, parseCrop, saveInput, saveInputs, transcodeTask } from "./lib.mjs";
 
 /**
  * 容器的 HTTP 外壳。处理代码在 lib.mjs（设备端处理共用），任务（都是 POST，请求体是原始文件）：
@@ -22,6 +22,9 @@ import { compressTask, deriveTask, metaTask, parseCrop, saveInput, transcodeTask
  *   /tasks/transcode  → video/mp4（带 Content-Length）
  *   /tasks/compress   → JSON { sha256, size, crc32, skipped, out } + 紧跟着的压缩后的 JPEG（x-json-length 是 JSON 的字节数；
  *                       不压缩时只有 JSON）。x-quality、x-min-saving、x-max-bytes、x-max-diff、x-max-pixels（0 不缩小）见 shared 的 COMPRESS_*。
+ *   /tasks/compose    → JSON { inputs: [{ sha256, size, crc32 }], out: { sha256, size, crc32, width, height } } + 紧跟着的 JPEG（同 compress）。
+ *                       请求体是几个原件首尾相接；x-inputs：JSON [{ size, kind: image | raw, rotation, crop: "x,y,w,h" | null }]，
+ *                       x-op：JSON { mode: stitch | split, direction, from?, to? }；x-quality、x-max-pixels、x-max-edge 见 shared 的 COMPOSE_*。
  *
  * 临时文件在请求结束时删除。同一时间只处理一个任务，避免多个 ffmpeg 抢内存（容器只有 1 vCPU）。
  */
@@ -98,6 +101,29 @@ const tasks = {
 		res.write(head);
 		if (outPath) await pipeline(createReadStream(outPath), res);
 		else res.end();
+	},
+
+
+	async compose(req, res, dir) {
+		const specs = JSON.parse(req.headers["x-inputs"] || "[]");
+		if (!Array.isArray(specs) || specs.length > 50) throw new Error("bad inputs");
+		const inputs = await saveInputs(req, dir, specs.map((s) => s.size));
+		const { body, outPath } = await composeTask(inputs, dir, {
+			tiles: specs.map((s) => ({ kind: s.kind, rotation: Number(s.rotation) || 0, crop: parseCrop(s.crop) })),
+			op: JSON.parse(req.headers["x-op"] || "null"),
+			quality: Number(req.headers["x-quality"]),
+			maxPixels: Number(req.headers["x-max-pixels"]),
+			maxEdge: Number(req.headers["x-max-edge"]),
+		});
+		const head = Buffer.from(JSON.stringify(body));
+		const { size } = await stat(outPath);
+		res.writeHead(200, {
+			"content-type": "application/octet-stream",
+			"content-length": String(head.length + size),
+			"x-json-length": String(head.length),
+		});
+		res.write(head);
+		await pipeline(createReadStream(outPath), res);
 	},
 };
 

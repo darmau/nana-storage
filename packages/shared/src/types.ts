@@ -9,8 +9,14 @@ export type FileRole =
 	| "poster"
 	| "video_preview";
 
-/** compress：原图压缩（src/compress.ts），1 次容器调用，不改缩略图和预览。 */
-export type JobKind = "process" | "rotate" | "compress";
+/**
+ * compress：原图压缩（src/compress.ts），1 次容器调用，不改缩略图和预览。
+ * compose：拼接 / 切割生成的新照片（src/compose.ts），1 次 compose（生成原件）+ 1 次 derive。
+ */
+export type JobKind = "process" | "rotate" | "compress" | "compose";
+
+/** 拼接 / 切割的方向：vertical 上下排列（纵向拼接、横着切），horizontal 左右排列。 */
+export type ComposeDirection = "vertical" | "horizontal";
 
 /** 队列消息只携带任务 ID，真实状态在 D1 的 jobs 表里。 */
 export interface JobMessage {

@@ -7,6 +7,7 @@ import {
 	transcodeTimeoutMs,
 	type JobKind,
 } from "@nana/shared";
+import { composeAsset } from "./compose";
 import { compressAsset } from "./compress";
 import { derivedKey } from "./derived";
 import { parseMeta, type Meta } from "./exif";
@@ -120,7 +121,7 @@ export const previewEdgeOf = (a: Pick<AssetRow, "preview_target">) => Math.max(P
 /** 剩下的时间不够这么多就不转码了。 */
 const MIN_TRANSCODE_TIMEOUT_MS = 30_000;
 
-export type ProcessorLike = Pick<ReturnType<typeof processorStub>, "derive" | "meta" | "transcode" | "compress">;
+export type ProcessorLike = Pick<ReturnType<typeof processorStub>, "derive" | "meta" | "transcode" | "compress" | "compose">;
 export type GetProcessor = (env: Env, slot: number) => ProcessorLike;
 
 /** getProcessor 可以替换，方便测试时不启动容器。 */
@@ -429,8 +430,11 @@ export const processorHandlers: Record<
 	process: processAsset,
 	rotate: rotateAsset,
 	compress: compressAsset,
+	// 设备端不认领 compose 任务（device.ts），这里只是让类型完整
+	compose: (job, env, getProcessor) => composeAsset(job, env, getProcessor),
 };
 
 handlers.process = (job, env) => processAsset(job, env);
 handlers.rotate = (job, env) => rotateAsset(job, env);
 handlers.compress = (job, env) => compressAsset(job, env);
+handlers.compose = (job, env) => composeAsset(job, env);

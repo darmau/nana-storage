@@ -31,14 +31,15 @@
 - **不使用 `@cloudflare/containers` 的 `Container` 类。** 它在容器运行期间会不断自我续期 alarm。改用原生的 `ctx.container`，再配合 `setInactivityTimeout`。
 - **不使用 R2 事件通知。** 派生文件写回同一个桶会再次触发处理。
 - **Worker 不请求自己的域名**，DO 之间不互相调用。
-- **只有 `jobs.ts` 里的 `createJob` / `createJobs`（原图压缩的批量操作）/ `enqueueJob` / `requeuePending` / `retryFailed` 可以往队列里投递消息。** `requeuePending` 的自动调用只有设备端交还云端后的补发（`requeueAfterDevice`），其余都是用户点击。 队列消费者从不自己投递。`createJob` 入队失败时删掉刚插入的任务再抛错；上传完成（`complete`）用 `jobInsert()` 把“条目改成 pending”和“建任务”放进同一个 batch，再 `enqueueJob`，入队失败只记日志（任务留在 D1，“重新排队”可以补发）。创建上传时条目和上传记录也在同一个 batch 里写，不会留下空条目。D1 的 `jobs` 表是唯一的真实状态，每个任务最多尝试 `MAX_JOB_ATTEMPTS` 次。
+- **只有 `jobs.ts` 里的 `createJob` / `createJobs`（原图压缩的批量操作）/ `enqueueJob`（上传完成、拼接 / 切割新建条目）/ `requeuePending` / `retryFailed` 可以往队列里投递消息。** `requeuePending` 的自动调用只有设备端交还云端后的补发（`requeueAfterDevice`），其余都是用户点击。 队列消费者从不自己投递。`createJob` 入队失败时删掉刚插入的任务再抛错；上传完成（`complete`）用 `jobInsert()` 把“条目改成 pending”和“建任务”放进同一个 batch，再 `enqueueJob`，入队失败只记日志（任务留在 D1，“重新排队”可以补发）。创建上传时条目和上传记录也在同一个 batch 里写，不会留下空条目。D1 的 `jobs` 表是唯一的真实状态，每个任务最多尝试 `MAX_JOB_ATTEMPTS` 次。
 - **只能通过 `processorStub(env, slot)` 获取 Processor**，`slot` 必须来自 `UsageGuard.acquireSlot()`，用完 `releaseSlot()`。池里固定只有 `PROCESSOR_POOL_SIZE`（32）个名字，Processor 也会拒绝在池外启动容器。同时运行几个容器由 `DEFAULT_PROCESSORS` 决定（4 个），设置页可以临时调高（`setProcessorsOverride()`，最长 7 天，到期自动回落，也可以提前结束：`clearProcessorsOverride()`）。队列 `max_concurrency` 等于 `PROCESSOR_POOL_SIZE`，多出来的消费者在 UsageGuard 里等槽位（最多 `SLOT_WAIT_MS`，不轮询），等不到就延迟重投，不算任务的尝试次数。延迟重投会消耗队列的 `max_retries`，所以它是 100（平台上限，`check:cost-rules` 只允许 ≤ 100）：太小的话，积压几千个任务时消息等槽位就耗光次数、进死信队列，任务永远停在 pending。重投不启动容器，同时最多 32 个消费者在等，每天最多约 7700 次。消息到达时任务正在运行（还没超过 `JOB_STALE_MS`）不 ack，而是延迟 `JOB_STALE_MS` 再看（`recheck`）：消费者中途被杀掉（部署、超时）后的重投靠它在过期后重新认领，否则任务永远停在 running。
 - 容器：`enableInternet: false`，不允许 keepAlive，每个任务都有硬超时，超时就 `destroy()`。空闲 `CONTAINER_INACTIVITY_MS`（30 秒）后由运行时停止；任务结束时如果没有 pending 任务、`UPLOAD_ACTIVE_MS` 内也没有新建上传，消费者在归还槽位之前直接停掉容器（`stopIfIdle`）。队列消费者单次最多 15 分钟，转码超时不会超过任务剩下的时间（`RunningJob.deadline`），不够就跳过转码。
 - 启动容器之前必须先 `UsageGuard.reserveJob()`，结束后调用 `recordContainer()` 记录实际时长。
 - UsageGuard 只防失控，不限制正常用量：每天的容器时长 / 任务数 / 上传量只记账和显示。熔断条件只有两个：本月（UTC 自然月）容器的估算超额费用（`containerCost()`，扣掉免费额度、CPU 按满载算）达到月度上限（默认 `DEFAULT_MONTHLY_BUDGET_USD` = $10，设置页可改，范围 `MIN/MAX_MONTHLY_BUDGET_USD`，存在 UsageGuard 里不过期）；同一条目一小时内自动重试（任务的第 2 次及以后的尝试）超过 `MAX_RETRIES_PER_ASSET_PER_HOUR`（6）次，或者全部运行（包括旋转、加载原图、手动重试这些用户操作新建的任务）超过 `MAX_PROCESS_PER_ASSET_PER_HOUR`（30）次。Workers / DO / D1 / R2 按次计费的部分不熔断，由 `wrangler.jsonc` 的速率上限封顶；没有账户级的看门狗（要额外的 API 令牌，部署太复杂），改为上传面板估算这一批的容器费用（`upload/estimate.ts`：本月平均每个任务的容器时间 × 张数，任务太少时用默认值，费用是 `containerCost()` 的增量），会超过月度上限或超过 $1 时建议设备端处理；只读一次 `GET /api/guard`，不轮询。超过月度上限时 `POST /api/guard/resume` 返回 409，必须先调高上限。因为同一条目反复处理而熔断时，UsageGuard 记下条目 id（`trippedAssetId`），成本防护页列出它的全部任务（`GET /api/jobs/asset/:id`，最多 50 个，`settings/AssetJobs.tsx`），可以停止排队中 / 卡住的任务（`POST /api/jobs/cancel { ids }` → `cancelJobs`，记成 failed、`last_error = cancelled`，熔断时也允许，之后可以照常重试），再恢复。
 - Cron 每次处理的数量都有上限，不会自我触发。
-- 设备端处理：设备租约（`DEVICE_LEASE_MS`，2 分钟，记在 UsageGuard，没有定时器）有效时，消费者用 `UsageGuard.gate()` 得知后直接 ack，不占槽位、不启动容器，任务留在 D1 等设备认领；设备每次认领续租，空闲时每 `DEVICE_POLL_MS`（10 秒）一次，一直开着每天约 8640 次请求。设备交还云端时补发一批，设备突然消失时由每小时 Cron 补发（每次 `RESUME_BATCH`）。设备的任务同样走 `reserveJob()`（循环熔断）和 `MAX_JOB_ATTEMPTS`，熔断时不能接管；设备的处理时长不记入容器费用。
+- 设备端处理：设备租约（`DEVICE_LEASE_MS`，2 分钟，记在 UsageGuard，没有定时器）有效时，消费者用 `UsageGuard.gate()` 得知后，设备会做的任务（`jobs.ts` 的 `DEVICE_KINDS`；compose 不算）直接 ack，不占槽位、不启动容器，任务留在 D1 等设备认领；设备每次认领续租，空闲时每 `DEVICE_POLL_MS`（10 秒）一次，一直开着每天约 8640 次请求。设备交还云端时补发一批，设备突然消失时由每小时 Cron 补发（每次 `RESUME_BATCH`）。设备的任务同样走 `reserveJob()`（循环熔断）和 `MAX_JOB_ATTEMPTS`，熔断时不能接管；设备的处理时长不记入容器费用。
 - compress 任务（原图压缩，`src/compress.ts`）只有 1 次容器调用（`/tasks/compress`），只由用户在“原图压缩”页点击触发，每次请求最多 `COMPRESS_BATCH_MAX` 张，每张最多压缩一次；不能压缩、不值得压缩的记成 `compress_state = 2`（原因在 `compress_skip`）不再是候选。选了分辨率上限时，已压缩的和只是不值得压缩的照片超过上限还能再处理一次，缩小之后不再超过同一上限，所以同一上限下每张最多再处理一次。
+- compose 任务（拼接 / 切割生成的新照片，`src/compose.ts`）：1 次 compose（`/tasks/compose`，生成原件）+ 1 次 derive（同一个任务里直接跑 `processAsset`），不创建新任务；只由用户点击触发，一次拼接 1 个任务（最多 `COMPOSE_STITCH_MAX` 张拼成 1 张）、一次切割每块 1 个任务（最多 `COMPOSE_SPLIT_MAX` 块）。原件已经生成过的重试只跑 derive。
 - 一个 process 任务最多调用容器：1 次 derive（指纹和人脸都在里面）+ 每个附件 1 次 meta + 最多 1 次 transcode（只有普通视频转码，Live Photo 的动态部分不转，浏览器不能解码 HEVC 时只显示静态照片）；它不创建新任务。rotate 任务（编辑：旋转 / 裁切 / 打码，“加载原图”）只有 1 次 derive。转码失败不会让任务失败（避免重试浪费），超过 `MAX_TRANSCODE_DURATION_MS` 的视频不转码。
 - 重试也不会成功的错误（比如完整性校验失败）抛 `permanent: true`，直接失败。
 - 前端：不允许 `refetchInterval`；重试和轮询都必须有次数或时间上限。
@@ -79,6 +80,15 @@
   - Worker：压缩后的写到新 key（`compressedKey()`：`o/{assetId}/c-{jobId}-{attempts}`，R2 按 sha256 校验），然后一条 UPDATE 把原件那一行换成新文件（条件是 r2_key / sha256 还是开始时读到的），记下 `source_sha256` / `source_size`、`compress_state = 1`，最后删旧对象。没换上就删新 key。缩略图、预览、指纹、人脸都不重做。
   - 压缩前的 sha256 留在 `source_sha256`：`uploads.ts` 的去重同时查它，重新上传原始文件仍算重复。process 任务写 CRC32 时按 sha256 定位，不会把旧文件的 CRC 写到压缩后的文件上。
   - 设备端：计划带 `compress`，设备跑同一个 `compressTask`，把结果上传到 `outputs.compressed`（`OUTPUT_FILES` 比派生文件多这一项），complete 时 Worker 对 R2 上的那份算 sha256 核对后才换。
+
+## 拼接与切割
+
+- 入口：多选栏和右键菜单，选了几张是“拼接”、只选一张是“切割”（`SelectionBar.tsx` 的 `composeItem`，弹窗在 `library/ComposeDialogs.tsx`）。拼接可以调整顺序、选纵向 / 横向；切割选方向和块数（先均分），切线可以拖动。
+- 服务端（`src/compose.ts`）：`POST /api/compose/stitch { ids, direction }`、`POST /api/compose/split { id, direction, cuts }`。新建条目（pending，处理好之前看不到）+ `compose_specs`（迁移 0032，生成方法和 `group_id`）+ 每个新条目一个 compose 任务，同一个 batch；拍摄时间、位置、描述、文件夹、归档沿用（第一张）原照片，时间和位置写 `meta_locked`，收藏是任意一张收藏过就收藏。视频、打码过的、没处理完的拒绝；结果超过 `COMPOSE_MAX_PIXELS` / `COMPOSE_MAX_EDGE`、切出来的块小于 `COMPOSE_MIN_PIECE_PX` 拒绝；熔断时拒绝。
+- 新照片的原件是重新生成的 JPEG（`COMPOSE_JPEG_QUALITY`，sRGB，不带色彩配置），按照片现在看起来的样子（EXIF 方向、用户旋转、裁切）处理，key 是 `o/{assetId}/m-{jobId}-{attempts}`，按容器算的 sha256 写入 R2，原照片的原件 sha256 对不上就失败（permanent）。拼接时每张缩到最窄（纵向）/ 最矮（横向）那张，不放大、没有留白。元数据只从第一张复制拍摄时间和 GPS；切割的还有相机和镜头，拼接的不带（相机拍的、长宽比 ≥ 2 的会被当成全景）。
+- 容器（`lib.mjs` 的 `composeTask`）：请求体是几个原件首尾相接（`saveInputs` 按 `x-inputs` 里的大小切开，DO 用 `concatStreams` 拼）；每张先 `vips thumbnail`（不缩放，只转正方向、转 sRGB）、铺白透明、旋转、裁切；拼接不用 `join` / `arrayjoin`：宽度相同的图上下相接时原始像素就是首尾相接，每张 `rawsave` 后追加到一个文件再 `rawload`，左右拼接先把每张转 90° 再整体转回来。
+- 收尾（`finishGroup`）：同一次操作的新条目全部 ready 时，`compose_specs.finished_at` 抢到的那个任务把原照片移进回收站、把新条目加进原照片所在的相册（只做一次）。有一张失败时原照片不动。
+- 设备端不做 compose：claim 只认领 `DEVICE_KINDS`，设备接管时消费者照常用容器处理 compose 任务。
 
 ## 时间线与查看器
 

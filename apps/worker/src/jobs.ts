@@ -17,7 +17,7 @@ import { ulid } from "./ulid";
  *  - D1 jobs 表是唯一真实状态；消息只是“去看看这个任务”的通知。
  *  - 消费者从不往队列里投递新消息。失败重试只用平台的 msg.retry()（受 max_retries 限制）。
  *  - 每个任务最多尝试 MAX_JOB_ATTEMPTS 次，然后标记 failed，只能手动重试。
- *  - 熔断打开时直接 ack，任务留在 pending，恢复时再分批补发。
+ *  - 熔断打开时直接 ack，任务留在 pending，恢复时再分批补发。设备端接管时设备会做的任务也直接 ack（DEVICE_KINDS）。
  *  - 每个任务先从 UsageGuard 拿一个容器槽位（独占一个 Processor），用完归还。
  *    等不到槽位就返回 busy：消息延迟后重新投递，不算任务的尝试次数（但算队列的 max_retries，所以它要够大，
  *    否则积压几千个任务时消息会在等槽位时耗尽次数、进死信队列，任务永远停在 pending）。
@@ -25,6 +25,9 @@ import { ulid } from "./ulid";
  *    不能直接 ack（后者的消息就丢了，任务永远停在 running），延迟 JOB_STALE_MS 再看：那时要么已经结束，要么算卡住、重新认领。
  *  - 归还槽位之前，如果后面没活了就直接停掉容器（stopIfIdle），不等空闲超时。
  */
+
+/** 设备端会认领的任务种类（device.ts 的 claim 用同一份）。compose（拼接 / 切割）只在容器里做。 */
+export const DEVICE_KINDS: ReadonlySet<JobKind> = new Set<JobKind>(["process", "rotate", "compress"]);
 
 export interface JobRow {
 	id: string;
@@ -125,8 +128,8 @@ export async function handleJobMessage(
 ): Promise<Outcome> {
 	const guard = guardStub(env);
 	const gate = await guard.gate();
-	// 熔断：任务留在 pending，恢复时补发。设备端接管中：任务留在 pending 等设备拉取，租约失效后 Cron 补发。
-	if (gate.tripped || gate.device) return "ack";
+	// 熔断：任务留在 pending，恢复时补发。
+	if (gate.tripped) return "ack";
 
 	const job = await env.DB.prepare(
 		"SELECT id, asset_id, kind, status, attempts, started_at FROM jobs WHERE id = ?",
@@ -134,6 +137,8 @@ export async function handleJobMessage(
 		.bind(msg.jobId)
 		.first<JobRow>();
 	if (!job) return "ack";
+	// 设备端接管中：任务留在 pending 等设备拉取，租约失效后 Cron 补发。设备不做的（拼接 / 切割）照常用容器。
+	if (gate.device && DEVICE_KINDS.has(job.kind)) return "ack";
 
 	const now = Date.now();
 	const stale = job.status === "running" && (job.started_at ?? 0) < now - JOB_STALE_MS;

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createWriteStream } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { crc32 } from "node:zlib";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -25,6 +25,7 @@ import { frost, frostSize, netpbm, parseMask, rasterizeMask } from "./mask.mjs";
  *                       faces：{ model, faces: [{ x, y, w, h, px, score, sharpness, embedding }], sprite }，见 faces.mjs。视频不算。
  *   /tasks/transcode  → video/mp4（带 Content-Length）
  *   /tasks/compress   → 原图压缩（compressTask）：JSON 加紧跟着的压缩后的 JPEG（x-json-length，同 derive 的 stream）。
+ *   /tasks/compose    → 拼接 / 切割（composeTask）：请求体是几个原件首尾相接（saveInputs），响应同 compress。
  *
  * 每个外部进程都有硬超时（SIGKILL）。临时文件由调用方在任务结束时删除。
  */
@@ -912,6 +913,222 @@ export async function compressTask(input, dir, { quality, minSaving, maxBytes, m
 			...base,
 			skipped: null,
 			out: { sha256: createHash("sha256").update(out).digest("hex"), size: out.length, crc32: crc32(out) >>> 0, ...target },
+		},
+		outPath,
+	};
+}
+
+// ---------------------------------------------------------------- 拼接与切割（/tasks/compose）
+
+/**
+ * 请求体是几个文件首尾相接（拼接时有几张原图就有几个），按 sizes 切开分别写到 dir 下的 input-0、input-1 …，
+ * 同时算各自的 sha256、大小和 CRC32（和 saveInput 一样）。数据比 sizes 多或少都抛错。
+ */
+export async function saveInputs(source, dir, sizes) {
+	if (!sizes.length || !sizes.every((n) => Number.isInteger(n) && n > 0)) throw new Error("bad input sizes");
+	const out = [];
+	let fh = null;
+	let hash;
+	let crc = 0;
+	let left = 0;
+	const finish = async () => {
+		await fh.close();
+		const i = out.length;
+		out.push({ path: join(dir, `input-${i}`), sha256: hash.digest("hex"), size: sizes[i], crc32: crc >>> 0 });
+		fh = null;
+	};
+	try {
+		for await (const chunk of source) {
+			let off = 0;
+			while (off < chunk.length) {
+				if (!fh) {
+					if (out.length >= sizes.length) throw new Error("request body is longer than the inputs");
+					fh = await open(join(dir, `input-${out.length}`), "w");
+					hash = createHash("sha256");
+					crc = 0;
+					left = sizes[out.length];
+				}
+				const part = chunk.subarray(off, off + Math.min(left, chunk.length - off));
+				hash.update(part);
+				crc = crc32(part, crc);
+				await fh.write(part);
+				left -= part.length;
+				off += part.length;
+				if (left === 0) await finish();
+			}
+		}
+	} finally {
+		await fh?.close().catch(() => {});
+	}
+	if (out.length !== sizes.length) throw new Error("request body ended early");
+	return out;
+}
+
+const headerText = async (path, field) => (await run("vipsheader", ["-f", field, path])).toString().trim();
+
+/**
+ * 一张原图整理成照片现在看起来的样子：按 EXIF 方向转正、8 位 sRGB 三通道（透明的地方铺白色），
+ * 再按用户的旋转、裁切处理（和预览一样的顺序）。写到 dir 下自己的子目录里，返回 .v 文件和尺寸。
+ * 色彩统一转到 sRGB：几张原图的色彩配置可能不同（P3 / sRGB），拼在一起只能用同一个。
+ */
+async function composeTile(input, dir, index, { kind, rotation, crop }) {
+	const sub = join(dir, `tile-${index}`);
+	await mkdir(sub);
+	let source = input.path;
+	if (kind === "raw") source = await rawToImage(input.path, sub, await exif(input.path));
+	else if (kind !== "image") throw new Error("bad kind");
+	const step = (name) => join(sub, `${name}.v`);
+	let cur = step("srgb");
+	// 盒子比任何图都大、只缩小不放大：不缩放，只转正方向和转色彩
+	await run("vips", ["thumbnail", source, cur, "10000000", "--height", "10000000", "--size", "down", "--export-profile", "srgb"], {
+		timeoutMs: 120_000,
+	});
+	const next = async (name, args) => {
+		const to = step(name);
+		await run("vips", [args[0], cur, to, ...args.slice(1)], { timeoutMs: 120_000 });
+		cur = to;
+	};
+	let bands = await header(cur, "bands");
+	if (bands === 2 || bands === 4) {
+		await next("flat", ["flatten", "--background", "255"]);
+		bands -= 1;
+	}
+	if (bands === 1) await next("rgb", ["colourspace", "srgb"]);
+	else if (bands > 3) await next("rgb3", ["extract_band", "0", "--n", "3"]);
+	if ((await headerText(cur, "format")) !== "uchar") await next("u8", ["cast", "uchar"]);
+	if (rotation) await next("rot", ["rot", `d${rotation}`]);
+	if (crop) {
+		const [left, top, w, h] = cropPixels(crop, await header(cur, "width"), await header(cur, "height"));
+		await next("crop", ["crop", String(left), String(top), String(w), String(h)]);
+	}
+	return { path: cur, width: await header(cur, "width"), height: await header(cur, "height"), dir: sub };
+}
+
+/** 文件的 sha256 和 CRC32（流式读，生成的 JPEG 可能有上百 MB）。 */
+async function fileDigest(path) {
+	const hash = createHash("sha256");
+	let crc = 0;
+	let size = 0;
+	for await (const chunk of createReadStream(path)) {
+		hash.update(chunk);
+		crc = crc32(chunk, crc);
+		size += chunk.length;
+	}
+	return { sha256: hash.digest("hex"), size, crc32: crc >>> 0 };
+}
+
+/** 新照片带上第一张原图的拍摄时间和位置（不带 ContentIdentifier：新照片不是 Live Photo）。 */
+const COMPOSE_TAGS = [
+	"DateTimeOriginal", "SubSecTimeOriginal", "OffsetTimeOriginal", "CreateDate", "OffsetTime",
+	"GPSLatitude", "GPSLatitudeRef", "GPSLongitude", "GPSLongitudeRef", "GPSAltitude", "GPSAltitudeRef",
+];
+/**
+ * 切割出来的还带上相机和镜头。拼接的不带：拼好的图不是一次拍摄，而且相机拍的、长宽比 ≥ 2 的照片会被当成全景（exif.ts）。
+ */
+const CAMERA_TAGS = ["Make", "Model", "LensMake", "LensModel"];
+
+/**
+ * 拼接 / 切割，生成一张新的 JPEG（quality，sRGB，不带色彩配置）。
+ * tiles：每个输入的 { kind: image | raw, rotation, crop }，和 inputs 一一对应。op：
+ *   { mode: "stitch", direction }            按顺序拼接：vertical 上下（每张缩到最窄那张的宽度），horizontal 左右（缩到最矮那张的高度），不放大
+ *   { mode: "split", direction, from, to }   只有一个输入，取其中一段：vertical 取 [from, to) 比例的行，horizontal 取列
+ * 都按照片现在看起来的样子（方向、用户旋转、裁切）处理。结果超过 maxPixels / maxEdge 就抛错。
+ * 元数据只从第一张原图复制拍摄时间、位置（切割的还有相机），见 COMPOSE_TAGS。
+ * 拼接不用 vips join / arrayjoin（逐张 join 每次都要写一遍整张图；arrayjoin 会把每格补成一样大）：
+ * 宽度相同的图上下相接，原始像素就是首尾相接，所以每张存成 raw 接在一个文件后面，再整个读回来编码。
+ * 左右拼接先把每张顺时针转 90°，上下接好之后再整个转回来。
+ * 返回 { body: { inputs: [{ sha256, size, crc32 }], out: { sha256, size, crc32, width, height } }, outPath }。
+ */
+export async function composeTask(inputs, dir, { tiles, op, quality, maxPixels, maxEdge, onStep = () => {} }) {
+	if (!Number.isInteger(quality) || quality < 50 || quality > 100) throw new Error("bad quality");
+	if (tiles.length !== inputs.length) throw new Error("bad tiles");
+	if (!["vertical", "horizontal"].includes(op?.direction)) throw new Error("bad direction");
+	if (op.mode === "stitch") {
+		if (inputs.length < 2) throw new Error("stitch needs at least 2 images");
+	} else if (op.mode === "split") {
+		if (inputs.length !== 1 || !(op.from >= 0 && op.to <= 1 && op.from < op.to)) throw new Error("bad split");
+	} else throw new Error("bad mode");
+	for (const t of tiles) if (![0, 90, 180, 270].includes(t.rotation)) throw new Error("bad rotation");
+	const vertical = op.direction === "vertical";
+	const check = (w, h) => {
+		if (w > maxEdge || h > maxEdge || w * h > maxPixels) throw new Error(`result too large (${w}x${h})`);
+	};
+
+	onStep("decode");
+	const parts = [];
+	for (let i = 0; i < inputs.length; i++) parts.push(await composeTile(inputs[i], dir, i, tiles[i]));
+
+	onStep("compose");
+	let image;
+	if (op.mode === "split") {
+		const [p] = parts;
+		const length = vertical ? p.height : p.width;
+		const start = Math.min(length - 1, Math.round(op.from * length));
+		const size = Math.max(1, Math.min(length, Math.round(op.to * length)) - start);
+		const [w, h] = vertical ? [p.width, size] : [size, p.height];
+		check(w, h);
+		image = join(dir, "piece.v");
+		const box = vertical ? ["0", String(start), String(w), String(h)] : [String(start), "0", String(w), String(h)];
+		await run("vips", ["crop", p.path, image, ...box], { timeoutMs: 120_000 });
+	} else {
+		// 统一的边：上下拼接是宽度，左右拼接是高度
+		const edge = Math.min(...parts.map((p) => (vertical ? p.width : p.height)));
+		const lengths = parts.map((p) => (vertical ? Math.max(1, Math.round((p.height * edge) / p.width)) : Math.max(1, Math.round((p.width * edge) / p.height))));
+		const total = lengths.reduce((a, b) => a + b, 0);
+		const [w, h] = vertical ? [edge, total] : [total, edge];
+		check(w, h);
+		const raw = join(dir, "joined.raw");
+		const sink = createWriteStream(raw);
+		for (let i = 0; i < parts.length; i++) {
+			const p = parts[i];
+			let cur = p.path;
+			const [tw, th] = vertical ? [edge, lengths[i]] : [lengths[i], edge];
+			if (p.width !== tw || p.height !== th) {
+				const to = join(p.dir, "scaled.v");
+				// 按精确的目标尺寸缩放（两个方向各自的比例），拼起来的边严丝合缝
+				await run("vips", ["resize", cur, to, String(tw / p.width), "--vscale", String(th / p.height)], { timeoutMs: 120_000 });
+				cur = to;
+			}
+			if (!vertical) {
+				const to = join(p.dir, "turned.v");
+				await run("vips", ["rot", cur, to, "d90"], { timeoutMs: 120_000 });
+				cur = to;
+			}
+			const [rw, rh] = [await header(cur, "width"), await header(cur, "height")];
+			if (rw !== edge || rh !== lengths[i]) throw new Error("tile size mismatch");
+			const bytes = join(p.dir, "tile.raw");
+			await run("vips", ["rawsave", cur, bytes], { timeoutMs: 120_000 });
+			await pipeline(createReadStream(bytes), sink, { end: false });
+			// 每张接上之后立刻删掉，临时目录最多同时有一张的 raw
+			await rm(p.dir, { recursive: true, force: true });
+		}
+		await new Promise((resolve, reject) => sink.end((e) => (e ? reject(e) : resolve())));
+		image = join(dir, "joined.v");
+		await run("vips", ["rawload", raw, image, String(edge), String(total), "3", "--interpretation", "srgb"], { timeoutMs: 120_000 });
+		if (!vertical) {
+			const turned = join(dir, "joined-back.v");
+			await run("vips", ["rot", image, turned, "d270"], { timeoutMs: 120_000 });
+			image = turned;
+		}
+	}
+
+	onStep("encode");
+	const outPath = join(dir, "composed.jpg");
+	await run("vips", ["copy", image, `${outPath}[Q=${quality},optimize_coding,keep=none]`], { timeoutMs: 180_000 });
+	try {
+		await run("exiftool", ["-overwrite_original", "-n", "-TagsFromFile", inputs[0].path, ...[...COMPOSE_TAGS, ...(op.mode === "split" ? CAMERA_TAGS : [])].map((t) => `-${t}`), outPath], {
+			timeoutMs: 30_000,
+		});
+	} catch (e) {
+		// 只是少了拍摄信息（Worker 那边的拍摄时间、位置照样从原照片复制），不让任务失败
+		console.error("compose metadata failed:", String(e?.message ?? e).slice(0, 300));
+	}
+	const width = await header(outPath, "width");
+	const height = await header(outPath, "height");
+	return {
+		body: {
+			inputs: inputs.map((i) => ({ sha256: i.sha256, size: i.size, crc32: i.crc32 })),
+			out: { ...(await fileDigest(outPath)), width, height },
 		},
 		outPath,
 	};

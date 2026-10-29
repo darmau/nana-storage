@@ -313,3 +313,24 @@ export const COMPRESS_SKIP_REASONS = ["not-jpeg", "colourspace", "extra-data", "
 export type CompressSkipReason = (typeof COMPRESS_SKIP_REASONS)[number];
 /** 缩小分辨率也处理不了的原因。 */
 export const COMPRESS_HARD_SKIPS: readonly CompressSkipReason[] = ["not-jpeg", "colourspace", "extra-data", "too-large"];
+
+// ---------------------------------------------------------------- 拼接与切割（src/compose.ts）
+
+/**
+ * 拼接：选中的 2–COMPOSE_STITCH_MAX 张照片纵向或横向拼成一张新照片；切割：一张照片切成 2–COMPOSE_SPLIT_MAX 张。
+ * 新照片的原件是重新生成的 JPEG（COMPOSE_JPEG_QUALITY，sRGB），按照片现在的样子（方向、用户旋转、裁切）处理；
+ * 拼接时每张按比例缩到最窄（纵向）/ 最矮（横向）的那张，不放大、没有留白。全部新照片处理好之后，原照片移进回收站。
+ * 每张新照片 1 个 compose 任务：1 次 compose + 1 次 derive（和上传的照片一样的处理）。只由用户点击触发。
+ */
+export const COMPOSE_STITCH_MAX = 20;
+export const COMPOSE_SPLIT_MAX = 10;
+export const COMPOSE_JPEG_QUALITY = 92;
+/** 生成的照片最多这么多像素、长边最多这么长（JPEG 的上限是 65535）。容器里要放下整张图的原始像素（3 字节 / 像素）。 */
+export const COMPOSE_MAX_PIXELS = 150_000_000;
+export const COMPOSE_MAX_EDGE = 65_000;
+/** 参与拼接的原件加起来最多这么大（都要先存进容器的临时目录）。 */
+export const COMPOSE_MAX_INPUT_BYTES = 1024 ** 3;
+/** 切割后每块沿切割方向至少这么多像素。 */
+export const COMPOSE_MIN_PIECE_PX = 16;
+/** compose 调用的硬超时：解码每张原图、拼接、编码一张一亿多像素的 JPEG。 */
+export const COMPOSE_TIMEOUT_MS = 5 * 60_000;

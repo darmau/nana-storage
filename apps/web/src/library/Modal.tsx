@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import { IconClose } from "../ui/icons";
 import { t } from "../i18n";
 
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+/** wide：桌面上更宽（需要预览图片的弹窗）。 */
+export function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
 	const ref = useRef<HTMLDivElement>(null);
 	useEffect(() => {
 		// 弹窗里还可以再开弹窗（比如在地图上选位置），Esc 只关最上面的那个
@@ -20,7 +21,7 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 				role="dialog"
 				aria-modal="true"
 				aria-label={title}
-				className="max-h-[80dvh] w-full overflow-y-auto rounded-t-3xl bg-card p-5 pb-[max(1.25rem,var(--safe-bottom))] shadow-2xl sheet-in sm:w-[28rem] sm:rounded-3xl sm:pb-5"
+				className={`max-h-[80dvh] w-full overflow-y-auto rounded-t-3xl bg-card p-5 pb-[max(1.25rem,var(--safe-bottom))] shadow-2xl sheet-in sm:rounded-3xl ${wide ? "sm:w-[40rem]" : "sm:w-[28rem]"} sm:pb-5`}
 				onClick={(e) => e.stopPropagation()}
 			>
 				<div className="mb-4 flex items-center justify-between">

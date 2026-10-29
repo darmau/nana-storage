@@ -359,6 +359,23 @@ export const IconCompress = icon(
 	</>,
 );
 
+/** 拼接：上下两块接在一起 */
+export const IconStitch = icon(
+	<>
+		<rect x="5" y="3" width="14" height="8" rx="1.5" />
+		<rect x="5" y="13" width="14" height="8" rx="1.5" />
+		<path d="M9 11v2M15 11v2" />
+	</>,
+);
+
+/** 切割：一张图中间一条虚线 */
+export const IconSplit = icon(
+	<>
+		<rect x="5" y="3" width="14" height="18" rx="1.5" />
+		<path d="M2 12h3M8 12h2M14 12h2M19 12h3" />
+	</>,
+);
+
 export const IconLogo = ({ size = 28 }: { size?: number }) => (
 	<svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="shrink-0">
 		<rect width="32" height="32" rx="8" className="fill-fg" />

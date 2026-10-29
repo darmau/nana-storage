@@ -5,12 +5,17 @@ import {
 	COMPRESS_MAX_DIFF,
 	COMPRESS_MIN_SAVING,
 	COMPRESS_TIMEOUT_MS,
+	COMPOSE_JPEG_QUALITY,
+	COMPOSE_MAX_EDGE,
+	COMPOSE_MAX_PIXELS,
+	COMPOSE_TIMEOUT_MS,
 	CONTAINER_INACTIVITY_MS,
 	FULL_PREVIEW_TIMEOUT_MS,
 	IMAGE_JOB_TIMEOUT_MS,
 	PREVIEW_LONG_EDGE,
 	PRICING,
 	PROCESSOR_POOL_SIZE,
+	type ComposeDirection,
 	type CropBox,
 } from "@nana/shared";
 
@@ -126,6 +131,22 @@ export interface CompressOutput {
 	out: { sha256: string; size: number; crc32: number; width?: number; height?: number } | null;
 }
 
+/** 拼接 / 切割的一个输入：原件（或只有 RAW 时的 RAW）和照片现在的旋转、裁切。 */
+export interface ComposeInput {
+	key: string;
+	kind: "image" | "raw";
+	rotation: number;
+	crop: CropBox | null;
+}
+export type ComposeOp =
+	| { mode: "stitch"; direction: ComposeDirection }
+	| { mode: "split"; direction: ComposeDirection; from: number; to: number };
+/** 拼接 / 切割（lib.mjs 的 composeTask）。inputs 是各个输入的校验和（完整性校验），out 是生成的 JPEG。 */
+export interface ComposeOutput {
+	inputs: { sha256: string; size: number; crc32: number }[];
+	out: { sha256: string; size: number; crc32: number; width: number; height: number };
+}
+
 const poolName = (i: number) => `proc-${i}`;
 
 export class Processor extends DurableObject<Env> {
@@ -178,12 +199,13 @@ export class Processor extends DurableObject<Env> {
 
 	/**
 	 * 调用容器任务。handle 负责消费响应（必须在超时内完成）。
-	 * 超时会中止请求并销毁容器。
+	 * 超时会中止请求并销毁容器。inputKeys 有几个时（拼接），请求体是这几个对象首尾相接。
 	 */
 	private async call<T>(
 		task: string,
-		inputKey: string,
-		headers: Record<string, string>,
+		inputKeys: string | string[],
+		/** 也可以按输入对象的大小生成（拼接时容器要按大小把请求体切开） */
+		headers: Record<string, string> | ((sizes: number[]) => Record<string, string>),
 		timeoutMs: number,
 		handle: (res: Response) => Promise<T>,
 	): Promise<Result<T>> {
@@ -195,8 +217,18 @@ export class Processor extends DurableObject<Env> {
 		const seconds = () => (Date.now() - started) / 1000 + tailSeconds;
 		const fail = (error: unknown): Result<T> => ({ ok: false, error: String(error).slice(0, 2000), containerSeconds: seconds() });
 
-		const object = await this.env.PHOTOS.get(inputKey);
-		if (!object) return fail(`missing object ${inputKey}`);
+		const keys = typeof inputKeys === "string" ? [inputKeys] : inputKeys;
+		const objects: R2ObjectBody[] = [];
+		const cancelAll = () => Promise.all(objects.map((o) => o.body.cancel().catch(() => {})));
+		for (const key of keys) {
+			const object = await this.env.PHOTOS.get(key);
+			if (!object) {
+				await cancelAll();
+				return fail(`missing object ${key}`);
+			}
+			objects.push(object);
+		}
+		const size = objects.reduce((n, o) => n + o.size, 0);
 
 		try {
 			this.starting ??= this.ensureRunning().finally(() => {
@@ -207,17 +239,25 @@ export class Processor extends DurableObject<Env> {
 				if (lastEnd) tailSeconds = Math.min(CONTAINER_INACTIVITY_MS, Math.max(0, started - lastEnd)) / 1000;
 			}
 		} catch (e) {
-			await object.body.cancel().catch(() => {});
+			await cancelAll();
 			return fail(e);
 		}
 
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(new Error(`${task} timeout after ${timeoutMs}ms`)), timeoutMs);
 		try {
+			let body: ReadableStream<Uint8Array> = objects[0]!.body;
+			if (objects.length > 1) {
+				const fixed = new FixedLengthStream(size);
+				void concatStreams(objects.map((o) => o.body))
+					.pipeTo(fixed.writable)
+					.catch(() => {});
+				body = fixed.readable;
+			}
 			const res = await this.ctx.container!.getTcpPort(PORT).fetch(`http://container/tasks/${task}`, {
 				method: "POST",
-				body: object.body,
-				headers: { ...headers, "content-length": String(object.size) },
+				body,
+				headers: { ...(typeof headers === "function" ? headers(objects.map((o) => o.size)) : headers), "content-length": String(size) },
 				signal: controller.signal,
 			});
 			if (!res.ok) return fail(`${task} ${res.status}: ${(await res.text()).slice(0, 1500)}`);
@@ -373,6 +413,41 @@ export class Processor extends DurableObject<Env> {
 	}
 
 	/**
+	 * 拼接 / 切割：几个输入首尾相接发给容器，容器返回 JSON + 生成的 JPEG，后半段直接流进 R2 的 outputKey（一个新 key）。
+	 * R2 按容器算的 sha256 校验写入的字节。要不要用它由调用方（src/compose.ts）决定。
+	 */
+	async compose(inputs: ComposeInput[], op: ComposeOp, outputKey: string): Promise<Result<ComposeOutput>> {
+		const specs = inputs.map((i) => ({ kind: i.kind, rotation: i.rotation, crop: i.crop && [i.crop.x, i.crop.y, i.crop.w, i.crop.h].join(",") }));
+		return this.call(
+			"compose",
+			inputs.map((i) => i.key),
+			(sizes) => ({
+				"x-inputs": JSON.stringify(specs.map((s, n) => ({ ...s, size: sizes[n] }))),
+				"x-op": JSON.stringify(op),
+				"x-quality": String(COMPOSE_JPEG_QUALITY),
+				"x-max-pixels": String(COMPOSE_MAX_PIXELS),
+				"x-max-edge": String(COMPOSE_MAX_EDGE),
+			}),
+			COMPOSE_TIMEOUT_MS,
+			async (res) => {
+				const total = Number(res.headers.get("content-length"));
+				const jsonLength = Number(res.headers.get("x-json-length"));
+				if (!res.body || !(total > jsonLength && jsonLength > 0)) throw new Error("compose returned a malformed stream");
+				const { head, rest } = await splitStream(res.body, jsonLength);
+				const body = JSON.parse(new TextDecoder().decode(head)) as ComposeOutput;
+				if (total - jsonLength !== body.out.size) throw new Error("compose returned a wrong length");
+				const fixed = new FixedLengthStream(body.out.size);
+				const [, written] = await Promise.all([
+					rest.pipeTo(fixed.writable),
+					this.env.PHOTOS.put(outputKey, fixed.readable, { httpMetadata: { contentType: "image/jpeg" }, sha256: body.out.sha256 }),
+				]);
+				if (written.size !== body.out.size) throw new Error("compose output size mismatch");
+				return body;
+			},
+		);
+	}
+
+	/**
 	 * 没有后续任务时立即停掉容器，省掉空闲超时那段空转。只能由持有这个槽位的消费者在释放槽位之前调用，
 	 * 这样不会打断别的任务。停掉之后清掉 lastTaskEnd，下次冷启动就不再补记空转时间。
 	 */
@@ -419,6 +494,31 @@ export async function splitStream(
 		},
 	});
 	return { head, rest };
+}
+
+/** 几个流按顺序首尾相接成一个。取消时把还没读完的都取消掉。 */
+export function concatStreams(streams: ReadableStream<Uint8Array>[]): ReadableStream<Uint8Array> {
+	let i = 0;
+	let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+	return new ReadableStream<Uint8Array>({
+		async pull(controller) {
+			while (i < streams.length) {
+				reader ??= streams[i]!.getReader();
+				const { done, value } = await reader.read();
+				if (!done) {
+					controller.enqueue(value);
+					return;
+				}
+				reader = null;
+				i++;
+			}
+			controller.close();
+		},
+		async cancel(reason) {
+			await reader?.cancel(reason);
+			for (const s of streams.slice(reader ? i + 1 : i)) await s.cancel(reason).catch(() => {});
+		},
+	});
 }
 
 function base64ToBytes(b64: string): Uint8Array {
