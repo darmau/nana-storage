@@ -303,6 +303,7 @@ export const zhCN = {
 		maskClear: "全部清除",
 		maskFull: "打码的地方太多了，先撤销一些再继续",
 		editBusy: "上次的修改还在生成，稍后再编辑",
+		processingVeil: "正在处理",
 		editLoadFailed: "图片加载失败，请稍后再试",
 		editFailed: (error: string) => `保存失败：${error}`,
 	},

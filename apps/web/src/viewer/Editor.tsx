@@ -549,10 +549,17 @@ export function EditPreview({ spec }: { spec: EditPreviewSpec }) {
 						<TurnedImage src={spec.src} w={W} h={H} turn={turn} />
 						{spec.overlay && <CanvasCopy source={spec.overlay} style={turnedStyle(W, H, turn)} />}
 					</div>
+					{/* 新图生成之前一直盖着，表示还在处理 */}
+					<ProcessingVeil style={{ inset: 0 }} />
 				</div>
 			)}
 		</div>
 	);
+}
+
+/** 正在等后台生成新图的照片上盖的黑色遮罩（位置由调用方给出）。 */
+export function ProcessingVeil({ style }: { style: React.CSSProperties }) {
+	return <div role="img" aria-label={t.viewer.processingVeil} className="pointer-events-none absolute bg-black/55" style={style} />;
 }
 
 /** 把一个画好的 canvas 显示出来（复制一份像素，原来的 canvas 不挂到页面上）。 */

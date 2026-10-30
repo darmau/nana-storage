@@ -306,6 +306,7 @@ export const en: Messages = {
 		maskClear: "Clear all",
 		maskFull: "Too many blurred areas. Undo some to continue.",
 		editBusy: "The last edit is still being applied. Try again in a moment.",
+		processingVeil: "Processing",
 		editLoadFailed: "Couldn't load the image. Try again later.",
 		editFailed: (error: string) => `Couldn't save: ${error}`,
 	},

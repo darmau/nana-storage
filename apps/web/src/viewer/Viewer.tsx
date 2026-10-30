@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { flushSync } from "react-dom";
 import { api, errorText } from "../api";
 import { batch, invalidateLibrary } from "../library/actions";
+import { markProcessing, unmarkProcessing, useProcessing } from "../library/processing";
 import { t } from "../i18n";
 import { formatTakenParts } from "../timeline/format";
 import { KIND_LIVE, KIND_VIDEO, previewUrl, thumbUrl } from "../timeline/types";
@@ -25,7 +26,7 @@ import { confirmDialog } from "../ui/confirm";
 import { setLiveAutoplay, useLiveAutoplay } from "../ui/liveAutoplay";
 import { useThemeColor } from "../ui/themeColor";
 import { assetFacesQuery } from "../people/model";
-import { EditPreview, type EditPreviewSpec, Editor, type EditResult } from "./Editor";
+import { EditPreview, type EditPreviewSpec, Editor, type EditResult, ProcessingVeil } from "./Editor";
 import { InfoPanel } from "./InfoPanel";
 import {
 	assetCrop,
@@ -197,6 +198,7 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 	const favorite = detail.data ? detail.data.favorite === 1 : item?.[6] === 1;
 	const [editing, setEditing] = useState(false);
 	const edit = useEditSave(id, detail.data, () => invalidateLibrary(qc));
+	const processing = useProcessing(id);
 	// 预览图本身的角度和裁切（有任务在跑时预览可能还是旧的，和详情对不上，原图、人脸圈都先不叠）
 	const settled = detail.data && detail.data.id === id && !detail.data.jobs_active && !edit.pending ? detail.data : null;
 	const crop = settled ? assetCrop(settled) : null;
@@ -426,6 +428,7 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 											onOriginal={hd.report}
 											scale={zoom.scale}
 											faces={!immersive && settled && personFaces?.length ? { boxes: personFaces, rotation: settled.rotation, crop } : null}
+											processing={processing}
 										/>
 									</div>
 								)}
@@ -673,6 +676,7 @@ function Still({
 	onOriginal,
 	scale,
 	faces = null,
+	processing = false,
 }: {
 	id: string;
 	rev: number;
@@ -697,6 +701,8 @@ function Still({
 	scale: number;
 	/** 要圈出来的脸：框按用户旋转之前的照片，rotation / crop 是预览图本身转过的角度和裁切框 */
 	faces?: { boxes: FaceBox[]; rotation: number; crop: CropBox | null } | null;
+	/** 拼接 / 切割（或之前的编辑）还在等后台生成新图：盖一层黑色遮罩 */
+	processing?: boolean;
 }) {
 	// 编辑完成后 URL 不变（版本号在提交时就已经更新，新图生成之前读到的是旧图），用 bust 参数强制重新加载
 	const suffix = bust ? `&b=${bust}` : "";
@@ -804,6 +810,7 @@ function Still({
 					/>
 				)
 			)}
+			{processing && <PreviewVeil preview={previewRef} />}
 			{loaded && faces && <FaceRings preview={previewRef} boxes={faces.boxes} rotation={faces.rotation} crop={faces.crop} scale={scale} />}
 			{live && sources[srcIndex] && (
 				<Framed preview={previewRef} rotation={rotation} crop={crop} className={`transition-opacity ${playing ? "opacity-100" : "opacity-0"}`}>
@@ -823,6 +830,13 @@ function Still({
 			)}
 		</div>
 	);
+}
+
+/** 正在处理的照片：和预览重合的黑色遮罩。 */
+function PreviewVeil({ preview }: { preview: React.RefObject<HTMLImageElement | null> }) {
+	const box = usePreviewBox(preview);
+	if (!box) return null;
+	return <ProcessingVeil style={{ left: box.l, top: box.t, width: box.w, height: box.h }} />;
 }
 
 /** 预览图在 Still 里的位置和大小（叠在它上面的东西按这个摆放），随布局变化更新。 */
@@ -1121,25 +1135,25 @@ const EDIT_POLL_MAX = 30;
 /**
  * 编辑的保存：PATCH 角度和裁切框（服务端版本号 +1、建 rotate 任务），保存期间用 pending（底图 + CSS）显示编辑结果，
  * 等后台生成好（有上限的轮询）再换成新图：version 加一，预览按新地址重新加载。
- * 换了照片就不再等（新图生成好之后，列表刷新时自然会拿到）。
+ * 等待期间这张照片带“正在处理”的遮罩（library/processing.ts，格子里也有）；换了照片、关掉查看器也照样等到结束，
+ * 遮罩才会在新图生成好时去掉。
  */
 function useEditSave(id: string, asset: AssetDetail | undefined, onDone: () => void) {
 	const qc = useQueryClient();
 	const [pending, setPending] = useState<{ id: string; spec: EditPreviewSpec } | null>(null);
 	const [version, setVersion] = useState(0);
-	const idRef = useRef(id);
-	idRef.current = id;
 
 	const save = async (r: EditResult) => {
 		if (!asset) return;
 		const forId = id;
 		const fromRev = asset.derived_rev;
 		setPending({ id: forId, spec: r.preview });
+		markProcessing([forId]);
 		try {
 			await api(`/assets/${forId}`, { method: "PATCH", json: { rotation: r.rotation, crop: r.crop, mask: r.mask } });
 			// 已经保存了：轮询出错（断网之类）就不等了，之后刷新列表时会拿到新图
 			try {
-				for (let i = 0; i < EDIT_POLL_MAX && idRef.current === forId; i++) {
+				for (let i = 0; i < EDIT_POLL_MAX; i++) {
 					await new Promise((res) => setTimeout(res, EDIT_POLL_MS));
 					const fresh = await qc.fetchQuery({
 						queryKey: ["asset", forId],
@@ -1153,6 +1167,7 @@ function useEditSave(id: string, asset: AssetDetail | undefined, onDone: () => v
 			setVersion((v) => v + 1);
 		} finally {
 			setPending((p) => (p?.id === forId ? null : p));
+			unmarkProcessing([forId]);
 		}
 	};
 	return { pending: pending?.id === id ? pending.spec : null, version, save };

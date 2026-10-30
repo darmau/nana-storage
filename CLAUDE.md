@@ -87,6 +87,7 @@
 - 服务端（`src/compose.ts`）：`POST /api/compose/stitch { ids, direction }`、`POST /api/compose/split { id, direction, cuts }`。新建条目（pending，处理好之前看不到）+ `compose_specs`（迁移 0032，生成方法和 `group_id`）+ 每个新条目一个 compose 任务，同一个 batch；拍摄时间、位置、描述、文件夹、归档沿用（第一张）原照片，时间和位置写 `meta_locked`，收藏是任意一张收藏过就收藏。视频、打码过的、没处理完的拒绝；结果超过 `COMPOSE_MAX_PIXELS` / `COMPOSE_MAX_EDGE`、切出来的块小于 `COMPOSE_MIN_PIECE_PX` 拒绝；熔断时拒绝。
 - 新照片的原件是重新生成的 JPEG（`COMPOSE_JPEG_QUALITY`，sRGB，不带色彩配置），按照片现在看起来的样子（EXIF 方向、用户旋转、裁切）处理，key 是 `o/{assetId}/m-{jobId}-{attempts}`，按容器算的 sha256 写入 R2，原照片的原件 sha256 对不上就失败（permanent）。拼接时每张缩到最窄（纵向）/ 最矮（横向）那张，不放大、没有留白。元数据只从第一张复制拍摄时间和 GPS；切割的还有相机和镜头，拼接的不带（相机拍的、长宽比 ≥ 2 的会被当成全景）。
 - 容器（`lib.mjs` 的 `composeTask`）：请求体是几个原件首尾相接（`saveInputs` 按 `x-inputs` 里的大小切开，DO 用 `concatStreams` 拼）；每张先 `vips thumbnail`（不缩放，只转正方向、转 sRGB）、铺白透明、旋转、裁切；拼接不用 `join` / `arrayjoin`：宽度相同的图上下相接时原始像素就是首尾相接，每张 `rawsave` 后追加到一个文件再 `rawload`，左右拼接先把每张转 90° 再整体转回来。
+- 前端：提交之后原照片盖着黑色遮罩（`processing.ts` 的 `watchCompose()`：每 3 秒查一张新照片的 `jobs_active`，最多 200 次，全部没有任务、出错或到上限时去掉）。
 - 收尾（`finishGroup`）：同一次操作的新条目全部 ready 时，`compose_specs.finished_at` 抢到的那个任务把原照片移进回收站、把新条目加进原照片所在的相册（只做一次）。有一张失败时原照片不动。
 - 设备端不做 compose：claim 只认领 `DEVICE_KINDS`，设备接管时消费者照常用容器处理 compose 任务。
 
@@ -128,7 +129,7 @@
 
 - `PATCH /api/assets/:id`：拍摄时间（拍摄地本地时间 + 时区偏移）、位置、描述、旋转、裁切、打码。编辑过的字段会写进 `meta_locked` 位标志（1 时间 / 2 位置 / 4 描述），process 任务重新处理时不会覆盖它们。
 - 批量修改走 `POST /api/assets/batch`：`set-time`（统一设成同一时刻）、`shift-time`（整体平移，在 SQL 里按各自的时区重算 `local_day`，没有拍摄时间或平移后超出范围的不改，时区未知的用浏览器时区补上）、`set-location`。同样写 `meta_locked`。每条语句 80 个 id，D1 单条语句最多 100 个参数。
-- 编辑（查看器顶栏的编辑按钮，`viewer/Editor.tsx`）：旋转、裁切和打码，**只改缩略图和预览，原件不动**。保存时一次 PATCH `{ rotation, crop, mask }`，之后用底图 + CSS（打码另叠一层 canvas）显示编辑结果（`EditPreview`），等后台生成好（每 2 秒查一次、最多 30 次）再换上新图。有任务在跑时不能编辑（底图可能还是旧的）。
+- 编辑（查看器顶栏的编辑按钮，`viewer/Editor.tsx`）：旋转、裁切和打码，**只改缩略图和预览，原件不动**。保存时一次 PATCH `{ rotation, crop, mask }`，之后用底图 + CSS（打码另叠一层 canvas）显示编辑结果（`EditPreview`），等后台生成好（每 2 秒查一次、最多 30 次，换了照片、关掉查看器也照样等完）再换上新图。有任务在跑时不能编辑（底图可能还是旧的）。等待期间这张照片在查看器和格子里都盖着黑色遮罩（`library/processing.ts` 的 `markProcessing()` / `useProcessing()`，只在这台设备的内存里：列表带 ETag、后台任务不改 `library` 版本，服务端的标记会过期）。
   - 只用 `rotate` 任务重新生成缩略图和预览（1 次 derive，不重读元数据、不转码），预览按 `preview_target`（换过全尺寸预览的保持原图尺寸）生成。已经有排队中的 rotate 任务时不再新建；任务运行时读取最新的角度、裁切和版本号，发现版本已过时就丢弃结果。视频不能编辑。
   - 裁切框存在 `assets.crop_x/y/w/h`（迁移 0017，0–1 的比例，相对于旋转之后、裁切之前的整张图；都为 NULL 表示没有裁切；shared 的 `crop.ts`）。只改角度时框跟着转（`rotateBox()`），和角度一起提交时按新的角度理解；覆盖整张图的框存成 NULL。`width` / `height` 仍然是裁切之前的尺寸（加载原图、信息面板、连拍判断都用它），列表接口返回裁切后的尺寸（`timeline.ts` 的 `ITEM_COLUMNS` + `toItem()`，网格按它排版）。
   - 容器（`x-crop` 头）先缩放、旋转，再裁切预览、从裁切后的预览生成缩略图；另外把旋转之后、裁切之前的整张图缩到长边 2048 存成底图（`d/{id}/base-{rev}.webp`，role `base`），编辑界面用（没有裁切、打码时直接用预览）。底图不记在 `asset_files` 里（role 有 CHECK 约束，改它要重建整张表），只能带版本号读；rotate 任务写完后按前缀列一次 R2 删掉其他版本的底图，永久删除时随 `DERIVED_FILES` 一起删；`storage_totals` 不算它。设备端的计划带 `crop` / `mask`，有裁切或打码时多上传一个 `outputs.base`。

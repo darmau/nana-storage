@@ -5,6 +5,7 @@ import { KIND_LIVE, KIND_VIDEO, type TimelineItem, thumbUrl } from "../timeline/
 import { openContextMenu } from "../ui/ContextMenu";
 import { IconAlert, IconBurst, IconCheck, IconClose, IconHeart, IconLive, IconPlay } from "../ui/icons";
 import { useAssetMenu } from "./SelectionBar";
+import { useProcessing } from "./processing";
 import { useSelection } from "./selection";
 import { t } from "../i18n";
 
@@ -58,6 +59,7 @@ export const Tile = memo(function Tile({ item, top, left, width, height, scope, 
 	const isSelected = selected.has(id);
 	const menu = useAssetMenu();
 	const mark = useContext(TileMarks)?.get(id);
+	const processing = useProcessing(id);
 
 	// 加载失败（比如快速滚动触发了限速）时，5 秒后重试一次，只重试一次。
 	const [attempt, setAttempt] = useState(0);
@@ -129,6 +131,8 @@ export const Tile = memo(function Tile({ item, top, left, width, height, scope, 
 			</button>
 			{/* 反例：整张压暗，一眼就能和正例分开 */}
 			{mark?.label === -1 && <span aria-hidden="true" className="pointer-events-none absolute inset-0 bg-black/55" />}
+			{/* 编辑 / 拼接 / 切割之后，新图生成之前 */}
+			{processing && <span role="img" aria-label={t.viewer.processingVeil} className="pointer-events-none absolute inset-0 bg-black/55" />}
 			{/* 悬停时顶部加一点暗色，让白色勾选框在浅色照片上也看得清 */}
 			<span
 				aria-hidden="true"

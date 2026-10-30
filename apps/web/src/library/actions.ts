@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { COMPRESS_BATCH_MAX, type ComposeDirection } from "@nana/shared";
 import { api } from "../api";
 import { armLibrarySync } from "./sync";
+import { watchCompose } from "./processing";
 
 export type BatchAction =
 	| { action: "favorite"; value: boolean }
@@ -48,20 +49,22 @@ export async function compressOriginals(qc: QueryClient, ids: string[], maxPixel
  */
 export async function stitchPhotos(qc: QueryClient, ids: string[], direction: ComposeDirection) {
 	const res = await api<{ assetIds: string[] }>("/compose/stitch", { method: "POST", json: { ids, direction } });
-	afterCompose(qc);
+	afterCompose(qc, ids, res.assetIds);
 	return res;
 }
 
 export async function splitPhoto(qc: QueryClient, id: string, direction: ComposeDirection, cuts: number[]) {
 	const res = await api<{ assetIds: string[] }>("/compose/split", { method: "POST", json: { id, direction, cuts } });
-	afterCompose(qc);
+	afterCompose(qc, [id], res.assetIds);
 	return res;
 }
 
-function afterCompose(qc: QueryClient) {
+function afterCompose(qc: QueryClient, sourceIds: string[], newIds: string[]) {
 	invalidateLibrary(qc);
 	void qc.invalidateQueries({ queryKey: ["jobs"] });
 	armLibrarySync();
+	// 原照片叠遮罩，直到新照片处理好（之后原照片移进回收站）
+	watchCompose(sourceIds, newIds, () => invalidateLibrary(qc));
 }
 
 export async function addToAlbum(qc: QueryClient, albumId: string, ids: string[]) {
