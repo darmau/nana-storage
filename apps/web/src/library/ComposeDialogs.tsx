@@ -1,11 +1,11 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { COMPOSE_MAX_EDGE, COMPOSE_MAX_PIXELS, COMPOSE_MIN_PIECE_PX, COMPOSE_SPLIT_MAX, COMPOSE_STITCH_MAX, type ComposeDirection } from "@nana/shared";
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { api, errorText } from "../api";
 import { fmtNumber } from "../i18n/format";
 import { t } from "../i18n";
 import { previewUrl, thumbUrl } from "../timeline/types";
-import { IconChevronDown, IconChevronLeft, IconChevronRight, IconChevronUp, IconMinus, IconPlus } from "../ui/icons";
+import { IconMinus, IconPlus } from "../ui/icons";
 import { displayDims } from "../viewer/media";
 import type { AssetDetail } from "../viewer/types";
 import { Modal } from "./Modal";
@@ -56,7 +56,21 @@ function Footer({ note, error, label, disabled, onClose, onConfirm }: { note: st
 	);
 }
 
-/** 拼接：调整顺序和方向，预览拼好的样子。ids 是选中的顺序。 */
+/** 拼接预览里照片之间的空隙（只是界面上的分隔，拼出来的图没有空隙）。 */
+const STITCH_GAP = 4;
+
+/** 按 order 排列时 id 的起点（沿拼接方向，像素）。 */
+const startOf = (order: string[], id: string, sizes: Map<string, number>) => {
+	let pos = 0;
+	for (const o of order) {
+		if (o === id) break;
+		const size = sizes.get(o);
+		if (size !== undefined) pos += size + STITCH_GAP;
+	}
+	return pos;
+};
+
+/** 拼接：拖动照片调整顺序，选方向，预览拼好的样子。ids 是选中的顺序。 */
 export function StitchDialog({ ids, onClose, onConfirm }: { ids: string[]; onClose: () => void; onConfirm: (ids: string[], direction: ComposeDirection) => void }) {
 	const [order, setOrder] = useState(ids);
 	const [direction, setDirection] = useState<ComposeDirection>("vertical");
@@ -84,42 +98,127 @@ export function StitchDialog({ ids, onClose, onConfirm }: { ids: string[]; onClo
 	else if (failed) error = t.common.loadFailed(errorText(failed.error));
 	else if (!loading) error = [...byId.values()].map(problem).find(Boolean) ?? (tooLarge ? t.compose.tooLarge : null);
 
-	const move = (i: number, by: -1 | 1) =>
+	// 拖动：按下时量好每张的长度，之后只算不量；拖着的那张跟手（transform），其余按新顺序排好，用 FLIP 动画让位
+	const list = useRef<HTMLOListElement>(null);
+	const drag = useRef<{ id: string; pointer: number; origin: number; sizes: Map<string, number> } | null>(null);
+	const [held, setHeld] = useState<{ id: string; offset: number } | null>(null);
+	const axis = (e: React.PointerEvent) => (vertical ? e.clientY : e.clientX);
+	const tile = (id: string) => list.current?.querySelector<HTMLElement>(`[data-id="${id}"]`);
+
+	const onDown = (e: React.PointerEvent, id: string) => {
+		if (e.button !== 0 || !list.current) return;
+		const sizes = new Map<string, number>();
+		for (const el of list.current.querySelectorAll<HTMLElement>("[data-id]")) {
+			const r = el.getBoundingClientRect();
+			sizes.set(el.dataset.id!, vertical ? r.height : r.width);
+		}
+		drag.current = { id, pointer: axis(e), origin: startOf(order, id, sizes), sizes };
+		list.current.setPointerCapture(e.pointerId);
+		setHeld({ id, offset: 0 });
+	};
+	const onMove = (e: React.PointerEvent) => {
+		const d = drag.current;
+		if (!d) return;
+		const at = d.origin + axis(e) - d.pointer;
+		// 插到让它的起点离手指位置最近的地方
+		const others = order.filter((o) => o !== d.id && d.sizes.has(o));
+		let best = 0;
+		let bestDist = Infinity;
+		for (let p = 0, pos = 0; p <= others.length; p++) {
+			if (Math.abs(pos - at) < bestDist) [best, bestDist] = [p, Math.abs(pos - at)];
+			if (p < others.length) pos += d.sizes.get(others[p]!)! + STITCH_GAP;
+		}
+		// 没加载出来的（不在预览里）放到最后，反正有错误时不能提交
+		const next = [...others.slice(0, best), d.id, ...others.slice(best), ...order.filter((o) => o !== d.id && !d.sizes.has(o))];
+		if (next.some((o, i) => o !== order[i])) setOrder(next);
+		setHeld({ id: d.id, offset: at - startOf(next, d.id, d.sizes) });
+	};
+	const onUp = () => {
+		const d = drag.current;
+		drag.current = null;
+		if (!d || !held) return;
+		// 松手时从当前位置滑回格子里
+		const t0 = vertical ? `translateY(${held.offset}px)` : `translateX(${held.offset}px)`;
+		if (!reducedMotion()) tile(d.id)?.animate([{ transform: t0 }, { transform: "none" }], { duration: 150, easing: "ease-out" });
+		setHeld(null);
+	};
+
+	// FLIP：顺序变了之后，没被拖着的照片从原来的位置滑到新位置；换方向时不做
+	const lastPos = useRef(new Map<string, number>());
+	const lastDirection = useRef(direction);
+	useLayoutEffect(() => {
+		const animate = lastDirection.current === direction && !reducedMotion();
+		lastDirection.current = direction;
+		for (const el of list.current?.querySelectorAll<HTMLElement>("[data-id]") ?? []) {
+			const id = el.dataset.id!;
+			const r = el.getBoundingClientRect();
+			// 拖着的那张记它在格子里的位置（去掉跟手的偏移），自己不做动画
+			const dragging = id === drag.current?.id;
+			const pos = (vertical ? r.top : r.left) - (dragging ? (held?.offset ?? 0) : 0);
+			const prev = lastPos.current.get(id);
+			lastPos.current.set(id, pos);
+			if (!dragging && animate && prev !== undefined && prev !== pos) {
+				const from = vertical ? `translateY(${prev - pos}px)` : `translateX(${prev - pos}px)`;
+				el.animate([{ transform: from }, { transform: "none" }], { duration: 150, easing: "ease-out" });
+			}
+		}
+	}, [order, direction, vertical]);
+
+	const moveBy = (i: number, by: -1 | 1) =>
 		setOrder((o) => {
+			if (i + by < 0 || i + by >= o.length) return o;
 			const next = [...o];
 			[next[i], next[i + by]] = [next[i + by]!, next[i]!];
 			return next;
 		});
-	const Prev = vertical ? IconChevronUp : IconChevronLeft;
-	const Next = vertical ? IconChevronDown : IconChevronRight;
-	const arrow = "flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white hover:bg-black/75 disabled:opacity-30";
 
 	return (
 		<Modal title={t.compose.stitchTitle(ids.length)} onClose={onClose} wide>
 			<Direction value={direction} onChange={setDirection} labels={[t.compose.vertical, t.compose.horizontal]} />
-			<div className={`rounded-xl bg-surface p-2 ${vertical ? "max-h-[45dvh] overflow-y-auto" : "overflow-x-auto"}`}>
-				{loading || over ? (
-					<div className="skeleton h-40 rounded-lg" />
+			<div className="flex justify-center rounded-xl bg-surface p-2">
+				{loading || over || !items.length ? (
+					<div className="skeleton h-60 w-full rounded-lg" />
 				) : (
-					<ol className={`flex ${vertical ? "mx-auto max-w-72 flex-col" : "h-40 w-max"}`}>
-						{items.map((it, i) => (
-							<li key={it.a.id} className="relative shrink-0" style={vertical ? { aspectRatio: `${edge} / ${lengths[i]}` } : { height: "100%", aspectRatio: `${lengths[i]} / ${edge}` }}>
-								<img src={thumbUrl(it.a.id, it.a.derived_rev)} alt="" className="h-full w-full object-fill" draggable={false} />
-								<span className="absolute left-1.5 top-1.5 rounded-full bg-black/55 px-2 text-xs font-semibold tabular-nums text-white">{i + 1}</span>
-								<div className={`absolute right-1.5 top-1.5 flex gap-1 ${vertical ? "" : "flex-col"}`}>
-									<button className={arrow} aria-label={t.compose.moveEarlier} disabled={i === 0} onClick={() => move(i, -1)}>
-										<Prev size={16} />
-									</button>
-									<button className={arrow} aria-label={t.compose.moveLater} disabled={i === items.length - 1} onClick={() => move(i, 1)}>
-										<Next size={16} />
-									</button>
-								</div>
-							</li>
-						))}
+					// 整张预览放进 50dvh 以内，不滚动：一眼看到全部顺序，触屏上拖动也不会和滚动冲突
+					<ol
+						ref={list}
+						className={`flex touch-none select-none ${vertical ? "flex-col" : ""}`}
+						style={{ gap: STITCH_GAP, width: `min(100%, calc(50dvh * ${W} / ${H}))`, aspectRatio: `${W} / ${H}` }}
+						onPointerMove={onMove}
+						onPointerUp={onUp}
+						onPointerCancel={onUp}
+					>
+						{items.map((it, i) => {
+							const dragging = held?.id === it.a.id;
+							return (
+								<li
+									key={it.a.id}
+									data-id={it.a.id}
+									tabIndex={0}
+									aria-label={t.compose.position(i + 1, items.length)}
+									className={`relative min-h-0 min-w-0 overflow-hidden rounded-[3px] outline-offset-2 ${dragging ? "z-10 cursor-grabbing shadow-xl ring-2 ring-accent" : "cursor-grab"}`}
+									style={{ flex: `${lengths[i]} 1 0`, transform: dragging ? (vertical ? `translateY(${held.offset}px)` : `translateX(${held.offset}px)`) : undefined }}
+									onPointerDown={(e) => onDown(e, it.a.id)}
+									onKeyDown={(e) => {
+										const by = e.key === (vertical ? "ArrowUp" : "ArrowLeft") ? -1 : e.key === (vertical ? "ArrowDown" : "ArrowRight") ? 1 : 0;
+										if (!by) return;
+										e.preventDefault();
+										moveBy(i, by);
+									}}
+								>
+									<img src={thumbUrl(it.a.id, it.a.derived_rev)} alt="" className="pointer-events-none h-full w-full object-cover" draggable={false} />
+									<span className="pointer-events-none absolute left-1 top-1 rounded-full bg-black/55 px-1.5 text-xs font-semibold tabular-nums text-white">{i + 1}</span>
+								</li>
+							);
+						})}
 					</ol>
 				)}
 			</div>
-			{!loading && items.length > 0 && <p className="mt-2 text-xs tabular-nums text-muted">{t.compose.resultSize(fmtNumber(W), fmtNumber(H))}</p>}
+			{!loading && items.length > 0 && (
+				<p className="mt-2 text-xs tabular-nums text-muted">
+					{t.compose.reorderHint} {t.compose.resultSize(fmtNumber(W), fmtNumber(H))}
+				</p>
+			)}
 			<Footer
 				note={t.compose.stitchNote}
 				error={error}
@@ -131,6 +230,8 @@ export function StitchDialog({ ids, onClose, onConfirm }: { ids: string[]; onClo
 		</Modal>
 	);
 }
+
+const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** 均分成 n 块的切线。 */
 const evenCuts = (n: number) => Array.from({ length: n - 1 }, (_, i) => (i + 1) / n);
