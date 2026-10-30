@@ -206,18 +206,6 @@ for (const stats of [false, true]) describe(`list query plans ${stats ? "with sk
 		});
 	}
 
-	it("largest photos and videos read only the top rows of assets_size", async () => {
-		for (const path of ["/stats/largest/photo", "/stats/largest/video"]) {
-			const stmts = (await capture(path)).filter((s) => s.sql.includes("INDEXED BY assets_size"));
-			expect(stmts.length, path).toBeGreaterThan(0);
-			for (const stmt of stmts) {
-				const p = await plan(stmt.sql, stmt.binds);
-				expect(p, p).toMatch(/assets_size/);
-				expect(p, p).not.toMatch(/TEMP B-TREE/);
-			}
-		}
-	});
-
 	// 原图压缩的候选：顺着 asset_files_compress 按大小倒序读，读到下限就停，不排序、不扫 assets
 	it("compression candidates read asset_files_compress in order", async () => {
 		const list = await capture(`/compress/candidates?min=${5 * 1024 ** 2}`);

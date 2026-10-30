@@ -1,5 +1,5 @@
 // 官网和文档里的费用表：构建时按应用自己的单价（packages/shared/src/pricing.ts）算，价格变了重新构建即可。
-// 只算应用能估算的项（和应用的“统计数据 › 费用”一致），请求数、R2 操作、D1 读写行数在免费额度内，不算。
+// 只算应用能估算的项，请求数、R2 操作、D1 读写行数在免费额度内，不算。
 import { PRICING, containerCost } from "../../../packages/shared/src/pricing.ts";
 
 /** 估算假设，写在表格下方。 */

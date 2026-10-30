@@ -14,7 +14,6 @@ import {
 	type DeviceLease,
 	type GuardMetric,
 	type GuardStatus,
-	type UsageDay,
 } from "@nana/shared";
 
 /**
@@ -272,20 +271,6 @@ export class UsageGuard extends DurableObject<Env> {
 			overrideExpiresAt: override && override.expiresAt > Date.now() ? override.expiresAt : null,
 			device: this.deviceLease(now),
 		};
-	}
-
-	/** 使用统计页用：从 sinceDay（含）开始每天的用量，按日期升序。没有记录的日子不返回。 */
-	async history(sinceDay: string): Promise<UsageDay[]> {
-		const days = new Map<string, UsageDay>();
-		for (const r of this.sql.exec<{ day: string; metric: GuardMetric; value: number }>(
-			"SELECT day, metric, value FROM usage WHERE day >= ? ORDER BY day",
-			sinceDay,
-		)) {
-			let d = days.get(r.day);
-			if (!d) days.set(r.day, (d = { day: r.day, containerSeconds: 0, jobs: 0, uploadBytes: 0 }));
-			d[r.metric] = r.value;
-		}
-		return [...days.values()];
 	}
 
 	async isTripped(): Promise<boolean> {

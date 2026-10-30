@@ -1,4 +1,4 @@
-import { Link, Outlet, createRootRoute, createRoute, createRouter, redirect, useRouterState } from "@tanstack/react-router";
+import { Link, Outlet, createRootRoute, createRoute, createRouter, useRouterState } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect } from "react";
 import { t } from "./i18n";
 import { ContextMenuHost, openMenuAt } from "./ui/ContextMenu";
@@ -16,7 +16,6 @@ import { CompressPage, OrganizePage } from "./routes/OrganizePages";
 import { DuplicatesPage } from "./routes/DuplicatesPage";
 import { SmartSetPage, SmartSetsPage, validateSmartSetSearch } from "./routes/SmartSetPages";
 import { TimelinePage, validateTimelineSearch } from "./routes/TimelinePage";
-import { StatsPage } from "./routes/StatsPage";
 import { StorageMeter } from "./library/StorageMeter";
 import { folderSearch, listSearch } from "./library/TypeFilter";
 import { GuardPage } from "./routes/settings/GuardPage";
@@ -30,7 +29,6 @@ import { ProgressRing, UploadWatcher, useUploadProgress } from "./upload/UploadS
 import {
 	IconAlbum,
 	IconArchive,
-	IconChart,
 	IconChevronRight,
 	IconCompass,
 	IconFolder,
@@ -52,8 +50,8 @@ import {
  * 整理（重复照片、相似照片、原图压缩）在移动端没有自己的标签，入口平铺在资料库首页，所以也算在这里。
  */
 const LIBRARY_PATHS = ["/library", "/favorites", "/archive", "/trash", "/organize", "/duplicates", "/compress"];
-/** 探索下的页面：移动端底部的“探索”标签在这些页面上也算选中（地图、统计数据在移动端从探索页进入） */
-const EXPLORE_PATHS = ["/search", "/people", "/smart-sets", "/map", "/stats"];
+/** 探索下的页面：移动端底部的“探索”标签在这些页面上也算选中（地图在移动端从探索页进入） */
+const EXPLORE_PATHS = ["/search", "/people", "/smart-sets", "/map"];
 const under = (pathname: string, p: string) => pathname === p || pathname.startsWith(`${p}/`);
 
 /**
@@ -162,9 +160,6 @@ function Layout() {
 				<SideLink to="/map" icon={<IconMap />}>
 					{t.nav.map}
 				</SideLink>
-				<SideLink to="/stats" icon={<IconChart />}>
-					{t.stats.title}
-				</SideLink>
 				<div className="mx-4 my-3 border-t border-border" />
 				<SideLink to="/trash" icon={<IconTrash />}>
 					{t.trash.title}
@@ -211,7 +206,7 @@ function SideLink({
 	forceActive,
 	children,
 }: {
-	to: "/" | "/map" | "/people" | "/smart-sets" | "/stats" | "/albums" | "/favorites" | "/archive" | "/organize" | "/trash";
+	to: "/" | "/map" | "/people" | "/smart-sets" | "/albums" | "/favorites" | "/archive" | "/organize" | "/trash";
 	icon: React.ReactNode;
 	exact?: boolean;
 	forceActive?: boolean;
@@ -284,8 +279,6 @@ const settingsTree = settingsRoute.addChildren([
 	createRoute({ getParentRoute: () => settingsRoute, path: "/", component: SettingsOverview }),
 	createRoute({ getParentRoute: () => settingsRoute, path: "/processing", component: ProcessingPage }),
 	createRoute({ getParentRoute: () => settingsRoute, path: "/guard", component: GuardPage }),
-	// 使用统计搬到了 /stats，旧书签跳过去
-	createRoute({ getParentRoute: () => settingsRoute, path: "/usage", beforeLoad: () => { throw redirect({ to: "/stats", replace: true }); } }),
 ]);
 const routeTree = rootRoute.addChildren([
 	createRoute({ getParentRoute: () => rootRoute, path: "/", component: TimelinePage, validateSearch: validateTimelineSearch }),
@@ -306,7 +299,6 @@ const routeTree = rootRoute.addChildren([
 	createRoute({ getParentRoute: () => rootRoute, path: "/archive", component: ArchivePage, validateSearch: listSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/trash", component: TrashPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/search", component: SearchPage, validateSearch: exploreSearch }),
-	createRoute({ getParentRoute: () => rootRoute, path: "/stats", component: StatsPage, validateSearch: viewerSearch }),
 	settingsTree,
 ]);
 

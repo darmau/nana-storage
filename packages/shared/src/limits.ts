@@ -266,15 +266,6 @@ export const FACE_REVIEW_TOP_K = 50;
 export const FACE_REVIEW_MIN = 0.35;
 export const FACE_REVIEW_MAX = 30;
 
-// ---------------------------------------------------------------- 统计数据页（/stats）
-
-/** 快照里保留最近多少天的每日张数（“一年内”按周汇总）。 */
-export const LIBRARY_STATS_DAYS = 366;
-/** 快照里最多保留多少个拍摄设备。 */
-export const LIBRARY_STATS_CAMERAS = 100;
-/** 最大的照片 / 视频各列出多少个。 */
-export const LARGEST_MAX = 50;
-
 // ---------------------------------------------------------------- 原图压缩（整理 › 原图压缩，src/compress.ts）
 
 /**

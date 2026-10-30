@@ -174,23 +174,18 @@
 - 隐私：人脸向量和人名只在 D1 / Vectorize 里，不调用任何外部服务；日志里不记人名。
 - 成本：每张照片多约 0.3 秒 + 每张脸约 0.1–0.2 秒容器时间；每张脸 1 次 Vectorize 查询。5 万张照片约 5–10 万张脸，Vectorize 费用很低。本地没有 Vectorize：只记录人脸，不归入。
 
-## 统计数据
+## 存储空间
 
-- 页面 `/stats`（`routes/StatsPage.tsx`，探索下的入口；旧地址 `/settings/usage` 跳过去），从上到下：概览、拍摄时间、拍摄设备、最大的文件、存储、费用、容器时长、增长。柱状图统一用 `ui/BarChart.tsx`。
-- 拍摄时间 / 拍摄设备（`src/library-stats.ts`）：不实时。每天的 Cron（`17 3 * * *`，回收站清理之后）用 3 条聚合查询统计一次，存成 `library_stats` 一行 JSON（迁移 0020）；`GET /api/stats/library` 只读这一行，还没有时（全新部署）现算一次。最近 `LIBRARY_STATS_DAYS` 天的每日张数（“一年内”在前端按 52 周汇总）+ 所有时间的每月张数（跨度超过 120 个月时按年显示）+ 设备（最多 `LIBRARY_STATS_CAMERAS` 个）。只算可见条目，连拍逐张计，日期是拍摄地本地日期。每天约 3 × 条目数的行读取 + 1 行写入。
-- 最大的照片 / 视频：`GET /api/stats/largest/:kind`（photo = photo + live 两条合并），实时，走部分索引 `assets_size`（迁移 0020），每种 kind 只读前 `LARGEST_MAX` 行，带 ETag（`library`）。返回列表视图的格式，前端直接用 `LibraryList view="list"`（查看器、多选、删除都能用）。
-- `GET /api/stats`（`src/stats.ts`）：条目数、各类文件的容量（原图 = original + raw + live_video，回收站和未完成的上传单列）、D1 大小、Vectorize 向量数（已进索引的人脸）、本月和最近 30 天的容器时长 / 任务 / 上传量（`UsageGuard.history()`，每日用量保留 62 天）、按上传月份的增长。
-- 费用估算只算应用自己能算出来的：套餐费、R2 / D1 存储、容器、Vectorize、队列。请求数、R2 操作、D1 读写行数不估算（不调用 GraphQL Analytics，部署时不需要额外的令牌）。单价和免费额度在 `packages/shared/src/pricing.ts`（`estimateCost()`），价格变了改这里。费用项的显示名称按 `CostKey` 放在前端语言文件的 `usage.costLines` 里，新增费用项时两边都要加（类型检查会提醒）。
-- 只在打开页面和点“刷新”时请求，不自动刷新；每次约 25 万行 D1 读取（5 万张时）+ 1 次 UsageGuard 请求。
-- 侧边栏底部 / 资料库首页（移动端）的存储空间（`library/StorageMeter.tsx`）走轻量的 `GET /api/stats/summary`：只读 `storage_totals` 一行（迁移 0013 的触发器维护：`asset_files` 全部文件（包括缩略图、预览、回收站）的字节数 + 处理好的照片（含 Live Photo）/ 视频数），不扫表，不查 UsageGuard。`/api/stats` 全量统计时顺手比对，对不上就用一条语句重新统计。打开应用时请求一次，之后只随 `invalidateLibrary()` 刷新（上传期间最多每 30 秒一次），不轮询。
+- 统计数据页（`/stats`）已经删掉：全量统计每次要扫几遍整个 `assets` / `asset_files`（实测每张照片约 18 行读取，30 万张时一次约 500 万行），不要再加回需要扫全库的统计页面或每天的全库统计 Cron。迁移 0020 的 `library_stats` 表和 `assets_size` 索引已经不用，下一个版本删除。
+- 侧边栏底部 / 资料库首页（移动端）的存储空间（`library/StorageMeter.tsx`）走轻量的 `GET /api/stats/summary`：只读 `storage_totals` 一行（迁移 0013 的触发器维护：`asset_files` 全部文件（包括缩略图、预览、回收站）的字节数 + 处理好的照片（含 Live Photo）/ 视频数），不扫表，不查 UsageGuard。打开应用时请求一次，之后只随 `invalidateLibrary()` 刷新（上传期间最多每 30 秒一次），不轮询。
 
 ## 界面设计
 
 - 颜色、尺寸都是 `apps/web/src/styles.css` 里的 token（`bg-bg`、`bg-card`、`text-muted`、`bg-accent`、`text-accent-fg` …），组件里不直接写色值。`@theme inline` 让 `.theme-dark` 子树（查看器）可以强制深色。
 - 布局尺寸变量：`--header-h`、`--sidebar-w`（md 以上的侧边栏）、`--tabbar-h`（移动端底部标签）。固定定位的东西（地图页、时间线拖动条、多选操作栏）都按这些变量避让。这三个变量已经包含安全区（刘海 / Home 指示条），其他贴边的元素用 `--safe-top/bottom/left/right`，不直接写 `env()`。
-- 导航：搜索框只有一个：桌面在顶栏（`SearchBox`，输入就跳到 `/search?q=`），移动端顶栏没有，放在探索页里（`md:hidden`）。侧边栏的“探索”小标题就是探索页（`/search`）的入口，下面是人物、主题（`/smart-sets`）、地图、统计数据（`/stats`）；移动端底部标签是 照片 / 相册 / 探索 / 文件夹 / 资料库：“探索”在 `/search`、`/people`、`/smart-sets`、`/map`、`/stats` 下都高亮（移动端的地图和统计数据从探索页进入）；“资料库”在收藏、归档、回收站和整理的几页（`/organize`、`/duplicates`、`/compress`）下高亮，面包屑“探索 › 主题”；“文件夹”在所有 `/folders/*` 下高亮。资料库首页（`routes/LibraryHome.tsx`）只放别处没有的入口：收藏、归档、回收站、整理的两项和存储空间（文件夹有自己的标签，人物在探索页里，不重复放）。
-- 探索页（`routes/SearchPage.tsx`）：没有搜索词和筛选时是入口页：人物、主题卡片（`SmartSetStrip`，不用 `ul li`，见下面的脚本钩子）、地图和统计数据、按类型。重复照片在“整理”里。有搜索词或筛选时显示结果。
-- 设置（`apps/web/src/routes/settings/`）：`SettingsLayout` 外壳 + 分页（概览 / 后台处理 / 成本防护；使用统计已搬到 `/stats`）。分页之间切换只淡入淡出（`ui/motion.ts`），不从右推入。语言是下拉框。lg 以上左侧是分页导航；窄屏时概览页就是目录，分页标题旁有返回按钮（`SettingsHeader`）。概览只在打开和点“刷新”时请求，不自动刷新。
+- 导航：搜索框只有一个：桌面在顶栏（`SearchBox`，输入就跳到 `/search?q=`），移动端顶栏没有，放在探索页里（`md:hidden`）。侧边栏的“探索”小标题就是探索页（`/search`）的入口，下面是人物、主题（`/smart-sets`）、地图；移动端底部标签是 照片 / 相册 / 探索 / 文件夹 / 资料库：“探索”在 `/search`、`/people`、`/smart-sets`、`/map` 下都高亮（移动端的地图从探索页进入）；“资料库”在收藏、归档、回收站和整理的几页（`/organize`、`/duplicates`、`/compress`）下高亮，面包屑“探索 › 主题”；“文件夹”在所有 `/folders/*` 下高亮。资料库首页（`routes/LibraryHome.tsx`）只放别处没有的入口：收藏、归档、回收站、整理的两项和存储空间（文件夹有自己的标签，人物在探索页里，不重复放）。
+- 探索页（`routes/SearchPage.tsx`）：没有搜索词和筛选时是入口页：人物、主题卡片（`SmartSetStrip`，不用 `ul li`，见下面的脚本钩子）、地图、按类型。重复照片在“整理”里。有搜索词或筛选时显示结果。
+- 设置（`apps/web/src/routes/settings/`）：`SettingsLayout` 外壳 + 分页（概览 / 后台处理 / 成本防护）。分页之间切换只淡入淡出（`ui/motion.ts`），不从右推入。语言是下拉框。lg 以上左侧是分页导航；窄屏时概览页就是目录，分页标题旁有返回按钮（`SettingsHeader`）。概览只在打开和点“刷新”时请求，不自动刷新。
 - 外观（跟随系统 / 浅色 / 深色）是这台设备的偏好，存在 localStorage（`ui/theme.ts`），由 `<html data-theme>` 生效；`public/theme.js` 在渲染前同步套用（CSP 不允许内联脚本），`dark:` 变体也跟着它走。新增深色相关的样式时，`styles.css` 里两处深色变量都要改。“关于”的版本号由 `vite.config.ts` 注入（`WORKERS_CI_COMMIT_SHA`，本地读 git）。
 - PWA：`public/manifest.webmanifest` + `index.html` 里的 iOS meta。manifest 也要鉴权，所以 `<link rel="manifest">` 必须带 `crossorigin="use-credentials"`。没有 Service Worker（不在浏览器里缓存任何照片）。全屏深色界面用 `ui/themeColor.ts` 的 `useThemeColor()` 临时改状态栏颜色；断网 / 登录过期由 `ConnectionBanner` 提示并提供重新加载（独立窗口里没有刷新按钮）。独立窗口里有自己的下拉刷新（`ui/PullToRefresh.tsx`，系统的下拉刷新被 `overscroll-behavior: none` 关掉了）：页面在顶部时下拉过阈值松手，`invalidateQueries()` 重新请求当前页面的数据（连接已中断时整页重新加载）；固定定位的东西（查看器、弹窗、地图、拖动条）、touch-action: none 和没滚到顶的滚动区域里不触发，刷新期间不接受新的下拉。图标由 `favicon.svg` 的图案渲染而来，改图标时一起更新几张 PNG。
 - 加载态：首次加载时照片网格（`LibraryList`）、时间线、相册列表、根目录的子文件夹、人物列表显示骨架屏（`ui/Skeleton.tsx`，纯 CSS 块，`.skeleton` 延迟 150ms 淡入，缓存命中时不闪；照片网格复用 `.scrub-placeholder` 的格子图案）。启动画面是 `index.html` 里 `#root` 外的 `#splash`（内联 Logo + 进度条，`.app-splash`），独立窗口里立即显示、普通标签页延迟 300ms，`Layout` 第一次渲染后由 `ui/splash.ts` 的 `hideSplash()` 淡出移除。

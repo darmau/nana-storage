@@ -16,7 +16,7 @@ Filter by date range, type (photo / video / Live Photo / burst / panorama / long
 
 ## The Explore page
 
-With no query, Explore is a hub: People, Topics, recently / most viewed, Map, Duplicates, Statistics and browse by type.
+With no query, Explore is a hub: People, Topics, recently / most viewed, Map, Duplicates and browse by type.
 
 "Recently viewed / most viewed" is stored only in this browser and never sent to the server.
 

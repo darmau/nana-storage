@@ -8,7 +8,7 @@ import { LibraryList } from "../library/LibraryList";
 import { smartSetsQuery } from "../library/queries";
 import { ASSET_TYPE_LABELS } from "../library/TypeFilter";
 import { FaceAvatar, peopleQuery, personName } from "../people/model";
-import { IconChart, IconChevronRight, IconClose, IconHeart, IconMap, IconSearch, IconSimilar } from "../ui/icons";
+import { IconChevronRight, IconClose, IconHeart, IconMap, IconSearch, IconSimilar } from "../ui/icons";
 import { useDocumentTitle } from "../ui/title";
 import { Cover } from "./LibraryPages";
 import { smartSetLine } from "./SmartSetPages";
@@ -87,7 +87,7 @@ export function SearchBox({ className = "", autoFocus }: { className?: string; a
 }
 
 /**
- * 探索：没有搜索词、没有筛选时是入口页（人物、主题、地图、重复照片和统计数据、按类型）；
+ * 探索：没有搜索词、没有筛选时是入口页（人物、主题、地图、按类型）；
  * 输入关键词或选了筛选条件就显示搜索结果。搜索的是文件名和描述，加上日期、类型、收藏、相机筛选。
  */
 export function SearchPage() {
@@ -200,7 +200,6 @@ function ExploreHome({ onType }: { onType: (type: AssetType) => void }) {
 				<h2 className="text-lg font-bold">{t.explore.more}</h2>
 				<div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
 					<Shortcut to="/map" icon={<IconMap />} title={t.nav.map} sub={t.explore.mapSub} />
-					<Shortcut to="/stats" icon={<IconChart />} title={t.stats.title} sub={t.explore.statsSub} />
 				</div>
 			</section>
 			<section className="space-y-3">
@@ -299,7 +298,7 @@ function SmartSetStrip() {
 	);
 }
 
-function Shortcut({ to, icon, title, sub }: { to: "/map" | "/stats"; icon: React.ReactNode; title: string; sub: string }) {
+function Shortcut({ to, icon, title, sub }: { to: "/map"; icon: React.ReactNode; title: string; sub: string }) {
 	return (
 		<Link to={to} className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 transition hover:bg-surface">
 			<span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent-ink">{icon}</span>

@@ -39,7 +39,6 @@ const SHOTS = [
 	{ id: "organize", path: travel ? `/folders/${travel.id}` : "/folders/root", w: 1280, h: 800 },
 	{ id: "albums", path: "/albums", w: 1280, h: 800 },
 	{ id: "map", path: "/map", w: 1280, h: 800, wait: 4000 },
-	{ id: "stats", path: "/stats", w: 1280, h: 800, wait: 1500 },
 	{ id: "search", path: "/search", w: 1280, h: 800 },
 	{ id: "processing", path: "/settings/processing", w: 1280, h: 800 },
 	{ id: "guard", path: "/settings/guard", w: 1280, h: 800 },

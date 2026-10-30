@@ -15,7 +15,7 @@ type ViewTransitionOptions = Exclude<NonNullable<RouterOptions<any, any>["defaul
  */
 
 /** 顶层页面：从这里进出都只淡入淡出（侧边栏里的每一项）。重复照片、相似照片、原图压缩是整理（/organize）的下一层，从右推入 */
-const TOP = new Set(["/", "/albums", "/search", "/people", "/smart-sets", "/map", "/stats", "/library", "/favorites", "/archive", "/organize", "/trash", "/folders/root", "/settings"]);
+const TOP = new Set(["/", "/albums", "/search", "/people", "/smart-sets", "/map", "/library", "/favorites", "/archive", "/organize", "/trash", "/folders/root", "/settings"]);
 
 const under = (path: string, p: string) => path === p || path.startsWith(`${p}/`);
 

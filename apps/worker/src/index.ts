@@ -15,7 +15,6 @@ import { assetJobs, failedJobs, jobsOverview } from "./progress";
 import { purgeTrash } from "./purge";
 import { forbidden, isSafeMutation, withSecurityHeaders } from "./security";
 import { library } from "./library";
-import { computeLibraryStats } from "./library-stats";
 import { map } from "./map";
 import { people, recognizePendingFaces } from "./people";
 import { refreshStaleSmartSets, similar } from "./similar";
@@ -235,14 +234,8 @@ export default {
 				}),
 			);
 		else if (controller.cron === "17 3 * * *") {
-			// 每天：清理回收站、中断的上传，再重新统计资料库（统计数据页的快照，固定 3 条聚合查询，见 library-stats.ts）
-			ctx.waitUntil(
-				purgeTrash(env)
-					.then(() => cleanupStaleUploads(env))
-					.finally(() =>
-						computeLibraryStats(env).catch((e) => console.error(JSON.stringify({ event: "cron_failed", error: String(e).slice(0, 300) }))),
-					),
-			);
+			// 每天：清理回收站、中断的上传
+			ctx.waitUntil(purgeTrash(env).then(() => cleanupStaleUploads(env)));
 		}
 	},
 } satisfies ExportedHandler<Env, JobMessage>;

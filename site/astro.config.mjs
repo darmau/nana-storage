@@ -46,7 +46,6 @@ export default defineConfig({
 					page("guide/map"),
 					page("guide/people"),
 					page("guide/similar"),
-					page("guide/stats"),
 					page("guide/settings"),
 					page("guide/pwa"),
 				]),
