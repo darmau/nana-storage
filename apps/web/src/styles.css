@@ -394,12 +394,12 @@ html.has-scrubber main {
 .menu-in {
 	animation: menu-in 140ms var(--ease-out);
 }
-/* 底部弹出（手机上的弹窗、多选操作栏、查看器的信息面板），宽屏时改成浮起 / 从右侧滑入 */
+/* 底部弹出（手机上的弹窗、查看器的信息面板），宽屏时改成浮起 / 从右侧滑入；多选操作栏盖在顶栏上，淡入 */
 .sheet-in {
 	animation: rise-in 280ms var(--ease-out);
 }
 .bar-in {
-	animation: rise-in 240ms var(--ease-out);
+	animation: fade-in 160ms var(--ease-out);
 }
 .panel-in {
 	animation: rise-in 280ms var(--ease-out);
@@ -407,9 +407,6 @@ html.has-scrubber main {
 @media (min-width: 40rem) {
 	.sheet-in {
 		animation: pop-in 200ms var(--ease-out);
-	}
-	.bar-in {
-		animation: pop-in 220ms var(--ease-spring);
 	}
 	.panel-in {
 		animation: side-in 220ms var(--ease-out);

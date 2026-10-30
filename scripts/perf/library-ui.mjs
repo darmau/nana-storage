@@ -32,6 +32,12 @@ const clickText = async (text, scope = "body") => {
 	if (!ok) throw new Error(`no button "${text}"`);
 	await sleep(400);
 };
+// 多选栏只直接放收藏、加入相册、删除，其余在“更多”菜单里
+const clickMore = async (text) => {
+	await page.click('[role="toolbar"] button[aria-label="更多操作"]');
+	await sleep(200);
+	await clickText(text, '[role="menu"]');
+};
 const tileCount = () => page.evaluate(() => document.querySelectorAll("div.group").length);
 const folderCards = () =>
 	page.evaluate(() => [...document.querySelectorAll("ul li a")].map((a) => a.querySelector("div.truncate")?.textContent + " | " + a.innerText.split("\n").at(-1)));
@@ -63,7 +69,7 @@ await page.click("ul li a");
 await page.waitForSelector("div.group img");
 await sleep(500);
 await selectTiles(1);
-await clickText("移出相册");
+await clickMore("移出相册");
 await sleep(800);
 check((await tileCount()) === 1, "removed one from album", `tiles=${await tileCount()}`);
 
@@ -85,7 +91,7 @@ await page.screenshot({ path: `${OUT}/lib-folders.png` });
 await page.goto(BASE + "/", { waitUntil: "networkidle0" });
 await page.waitForSelector("#timeline img");
 await selectTiles(1);
-await clickText("移动");
+await clickMore("移到文件夹");
 await clickText("📁 测试", '[role="dialog"]');
 await sleep(500);
 await clickText("📁 子文件夹", '[role="dialog"]');
@@ -145,7 +151,7 @@ await cdp.send("Browser.setDownloadBehavior", { behavior: "deny" });
 let downloadRequested = false;
 page.on("request", (r) => r.url().includes("/api/downloads/") && r.method() === "GET" && (downloadRequested = true));
 await selectTiles(3);
-await clickText("下载");
+await clickMore("下载");
 await sleep(1500);
 check(downloadRequested, "download link opened");
 check(await page.evaluate(() => document.body.innerText.includes("正在下载")), "download message shown");

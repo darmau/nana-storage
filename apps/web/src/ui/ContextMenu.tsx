@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 
 /**
  * 右键菜单。全局只有一个，由 <ContextMenuHost /> 渲染；任何地方调用 openContextMenu(e, items) 打开。
- * openMenuAt(按钮, items) 把同一个菜单挂在按钮下方（手机页头的“更多”），下方放不下时挂在按钮上方（多选栏的“更多”）。
+ * openMenuAt(按钮, items) 把同一个菜单挂在按钮下方（页头和多选栏的“更多”），下方放不下时挂在按钮上方。
  * 点击外面、Esc、滚动、窗口变化都会关闭。触屏不弹（长按已经用来多选）。
  */
 

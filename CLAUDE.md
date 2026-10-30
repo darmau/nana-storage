@@ -113,7 +113,7 @@
 - 归档（`assets.archived`，迁移 0024）：归档的照片不出现在时间线（首页，按月张数也不算）、文件夹和相册里，文件夹 / 相册卡片的张数、体积和封面也不算；文件夹 / 相册页勾选“显示归档照片”（地址的 `?archived=1`，`useShowArchived()`，接口同名参数）时才列出。集中在归档页（`/archive`，`GET /api/archive/assets`，部分索引 `assets_archived_visible`，侧边栏和资料库首页有入口）。搜索、地图、人物、主题、收藏、连拍页照常显示。操作走 `POST /api/assets/batch { action: "archive", value }`，多选栏 / 右键菜单里：普通列表只有“归档”，显示了归档照片的列表两种都有（`BarContext` 的 `withArchived`），归档页只有“取消归档”。
 - 永久删除只能删已经在回收站里的条目（`deleteAssetsPermanently`，先删 R2 再删 D1；除了 `asset_files` 里的文件，还按当前版本号删掉派生文件的 key，任务失败时写下的文件没有记录）。D1 的 `meta.changes` 会把级联删除的行也算进去，不能拿它当计数。
 - 批量下载（`src/downloads.ts` + `src/zip.ts`）：zip 只存储不压缩，CRC32 由容器在处理时算好并存在 `asset_files.crc32`，Worker 只转发字节，`Content-Length` 也能事先算准；需要时自动使用 ZIP64。`test-node/zip.test.ts` 用 python zipfile 和 `unzip -t` 校验输出。
-- 前端：`library/` 下是多选（勾选框 / 长按 / Shift 点击）、操作栏（手机上只露出收藏 / 加入相册 / 下载 / 删除，其余用 `max-sm:hidden` 隐藏、收进“更多”菜单，按钮仍在 DOM 里）、通用列表网格；查看器通过 `ViewerNav` 接入不同数据源（时间线按月，列表按已加载的页）。
+- 前端：`library/` 下是多选（勾选框 / 长按 / Shift 点击）、操作栏（`SelectionBar`：选择期间盖在顶栏上、同样的高度，不显示顶栏；直接放收藏 / 加入相册 / 删除，归档、移动、加入主题、时间和地点、拼接 / 切割、下载等收进“更多”菜单（`openMenuAt`），归档页的“取消归档”直接放在栏上；手机上只显示图标）、通用列表网格；查看器通过 `ViewerNav` 接入不同数据源（时间线按月，列表按已加载的页）。
 - 幻灯片（`apps/web/src/viewer/Slideshow.tsx`）：文件夹 / 相册页头的“幻灯片”按钮，和网格共用分页查询。顺序播放快到末尾才加载下一页，随机播放逐页加载全部（最多 200 页，一次一个请求，出错即停）；每张只请求一次预览，间隔最短 3 秒；视频跳过。
 - 界面流程测试：`node scripts/perf/library-ui.mjs <截图目录>`。大列表压力测试：`node scripts/perf/library-stress.mjs <截图目录> <列表路径>...`（一直滚到底，记录 DOM 节点数、JS 堆和长任务）。
 
@@ -194,7 +194,7 @@
 - 多语言（简体中文 / English，`apps/web/src/i18n/`）：界面文案一律写进 `zh-CN.ts`（源语言）和 `en.ts`，代码里用 `t.xxx` / `t.xxx(n)`，不在组件里写死文案；`en.ts` 声明成 `Messages`，少一条或参数不对都过不了类型检查。带数字的文案写成函数，英文单复数在函数里处理；数字用 `fmtNumber()`，不用 `toLocaleString()`。语言是这台设备的偏好（localStorage `nana:lang`，默认按浏览器语言），加载时确定一次，切换时重新加载页面，所以 `t` 是普通的模块级值，非组件代码也能用。被 Web Worker 导入的文件（如 `upload/read.ts`）不引用 `t`，错误由主线程翻译。`pnpm check:i18n --strict`（CI 里会跑）按语法树检查，`apps/web/src` 里除了 `i18n/` 和测试文件，字符串、模板和 JSX 文本都不能出现中文（注释不算）。`scripts/perf/*.mjs` 靠中文文案定位元素，所以都先把 `nana:lang` 设成 `zh-CN`。
 - 服务端的错误码保持英文（`{ error: "..." }`），前端 `api.ts` 按 `t.api.codes` 把它翻译后放进 `ApiError.message`（原始错误码在 `code`）；界面上显示错误一律用 `errorText()`，不要 `String(error)`。新增错误码时在两个语言文件的 `api.codes` 里各补一条。动效类（查看器进出 / 切换、弹窗 `sheet-in`、菜单 `menu-in`、多选栏 `bar-in`、信息面板 `panel-in` …）在 `styles.css` 末尾，只动 opacity / transform，系统开启“减少动态效果”时全部关闭（新增动效类时加进那个媒体查询）。
 - 页面切换用 View Transitions（`ui/motion.ts`，路由的 `defaultViewTransition`）：进入下一层从右推入，后退 / 回上一层反向，顶层页面之间淡入淡出；只改地址参数（查看器 `?a=`、筛选 `?type=`）不做动画。浏览器不支持带类型的 View Transition 时整个关掉。顶栏、侧边栏、底部标签有 `view-transition-name`，不跟着页面动；新增顶层页面时加进 `TOP`。
-- `scripts/perf/*.mjs` 依赖这些钩子，改界面时要保留：格子是 `div.group`，里面最后一个按钮是 `aria-label="选择"` 的勾选框；查看器是 `[role="dialog"]`，信息面板是其中的 `aside`；相册 / 文件夹卡片是 `ul li a` 加 `div.truncate` 名称；多选栏的按钮文字（加入相册、移动、下载、删除 …）必须是页面上第一个以该文字开头的按钮。
+- `scripts/perf/*.mjs` 依赖这些钩子，改界面时要保留：格子是 `div.group`，里面最后一个按钮是 `aria-label="选择"` 的勾选框；查看器是 `[role="dialog"]`，信息面板是其中的 `aside`；相册 / 文件夹卡片是 `ul li a` 加 `div.truncate` 名称；多选栏直接放的按钮文字（加入相册、删除 …）必须是页面上第一个以该文字开头的按钮，“更多”按钮是 `[role="toolbar"] button[aria-label="更多操作"]`，菜单里的项在 `[role="menu"]` 里。
 
 
 ## 部署

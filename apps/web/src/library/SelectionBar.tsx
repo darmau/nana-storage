@@ -189,7 +189,7 @@ export function AssetActionsProvider({ context, children }: { context: BarContex
 			{message && (
 				<p
 					role="status"
-					className="fixed bottom-[calc(var(--tabbar-h)+5rem)] left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 pop-in rounded-full bg-fg px-4 py-2 text-sm text-bg shadow-lg sm:bottom-24 md:left-[calc(50%+var(--sidebar-w)/2)]"
+					className="fixed bottom-[calc(var(--tabbar-h)+1rem)] left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 pop-in rounded-full bg-fg px-4 py-2 text-sm text-bg shadow-lg md:bottom-6 md:left-[calc(50%+var(--sidebar-w)/2)]"
 				>
 					{message}
 				</p>
@@ -401,7 +401,10 @@ export function useAssetMenu() {
 	};
 }
 
-/** 多选时出现在底部的操作栏。 */
+/**
+ * 多选时的操作栏：盖在顶栏上（同样的高度和位置），选择期间不显示顶栏，省出空间。
+ * 资料库类的列表只直接放收藏、加入相册、删除，其余（归档、移动、主题、时间地点、拼接 / 切割、下载 …）收进“更多”。
+ */
 export function SelectionBar() {
 	const qc = useQueryClient();
 	const { selected, clear } = useSelection();
@@ -409,162 +412,130 @@ export function SelectionBar() {
 	if (!selected.size) return null;
 	const ids = [...selected];
 
-	// 移动端：贴底、盖住底部导航，只显示图标（文字留给读屏）；桌面：浮在内容区底部中间的胶囊
+	// 移动端只显示图标（文字留给读屏），sm 以上带文字
 	const btn =
 		"inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-full px-2.5 text-sm font-medium hover:bg-surface disabled:opacity-50 sm:px-3.5";
 	const label = "sr-only sm:not-sr-only";
-	// 手机上一行放不下全部按钮：只留收藏、加入相册、下载、删除，其余收进“更多”
-	const desktopOnly = "max-sm:hidden";
 	const archive = archiveModes(context).map((value) => ({
 		value,
 		label: value ? t.actions.archive : t.actions.unarchive,
 		onSelect: () => void run(() => batch(qc, ids, { action: "archive", value }), value ? t.actions.archived : t.actions.unarchived),
 	}));
-	// 归档页里“取消归档”是主要操作，手机上也直接显示
+	// 归档页里“取消归档”是主要操作，直接放在栏上
 	const archiveInBar = context.kind === "archive";
-	const composeAction = composeItem(ids, pick, false);
 	const more: MenuItem[] = [
 		...(archiveInBar ? [] : archive.map((a) => ({ label: a.label, icon: <IconArchive size={18} />, onSelect: a.onSelect }))),
-		{ label: t.actions.moveToFolder, icon: <IconFolderMove size={18} />, onSelect: () => pick("folder", ids) },
-		{ label: t.actions.addToTopic, icon: <IconSimilar size={18} />, onSelect: () => pick("smartSet", ids) },
-		{ label: t.actions.editMeta, icon: <IconEdit size={18} />, onSelect: () => pick("meta", ids) },
-		composeAction,
+		{ label: t.actions.moveToFolderMenu, icon: <IconFolderMove size={18} />, onSelect: () => pick("folder", ids) },
+		{ label: t.actions.addToTopicMenu, icon: <IconSimilar size={18} />, onSelect: () => pick("smartSet", ids) },
+		{ label: t.actions.editMetaMenu, icon: <IconEdit size={18} />, onSelect: () => pick("meta", ids) },
+		composeItem(ids, pick, true),
+		{ label: t.actions.download, icon: <IconDownload size={18} />, onSelect: () => download(ids) },
 	];
 	if (context.kind === "album")
-		more.push({ label: t.actions.removeFromAlbum, icon: <IconClose size={18} />, onSelect: () => void run(() => removeFromAlbum(qc, context.albumId, ids)) });
+		more.push("sep", { label: t.actions.removeFromAlbum, icon: <IconClose size={18} />, onSelect: () => void run(() => removeFromAlbum(qc, context.albumId, ids)) });
 	if (context.kind === "topicResults")
-		more.push({ label: t.actions.notInTopic, icon: <IconClose size={18} />, onSelect: () => void run(() => setSmartSetExamples(qc, context.setId, ids, -1), t.actions.markedNegative) });
+		more.push("sep", { label: t.actions.notInTopic, icon: <IconClose size={18} />, onSelect: () => void run(() => setSmartSetExamples(qc, context.setId, ids, -1), t.actions.markedNegative) });
 	return (
 		<div
 			role="toolbar"
 			aria-label={t.actions.toolbar}
-			className="bar-in fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card px-2 pb-[max(0.5rem,var(--safe-bottom))] pt-2 shadow-[0_-4px_24px_rgb(0_0_0/0.08)] sm:inset-x-auto sm:bottom-6 sm:left-1/2 sm:w-max sm:max-w-[calc(100vw-2rem)] sm:-translate-x-1/2 sm:rounded-full sm:border sm:pb-2 md:left-[calc(50%+var(--sidebar-w)/2)] md:max-w-[calc(100vw-var(--sidebar-w)-2rem)]"
+			className="bar-in fixed inset-x-0 top-0 z-40 flex h-[var(--header-h)] select-none items-center gap-0.5 overflow-x-auto border-b border-border bg-bg pl-[max(0.5rem,var(--safe-left))] pr-[max(0.5rem,var(--safe-right))] pt-[var(--safe-top)] md:pl-[max(1rem,var(--safe-left))] md:pr-[max(1rem,var(--safe-right))]"
 		>
-			<div className="flex items-center gap-0.5 overflow-x-auto">
-				<button className={btn} onClick={clear} aria-label={t.library.deselect}>
-					<IconClose />
-				</button>
-				<span className="mr-auto whitespace-nowrap pl-1 pr-3 text-sm font-semibold sm:mr-2">
-					{selected.size >= MAX_SELECTION ? t.actions.selectedAtLimit(selected.size) : t.actions.selected(selected.size)}
-				</span>
-				{context.kind === "person" ? (
-					personItems(
-						context,
-						() => void run(() => removeFromPerson(qc, context.personId, ids)),
-						() => pick("person", ids),
-					).map((it) => (
-						<button key={it.label} className={btn} disabled={busy} onClick={it.onSelect}>
-							{it.icon}
-							<span>{it.label}</span>
-						</button>
-					))
-				) : context.kind === "smartSet" ? (
-					smartSetItems(context, (l) => run(() => setSmartSetExamples(qc, context.setId, ids, l), sampleDone(l))).map((it) => (
-						<button key={it.label} className={btn} disabled={busy} onClick={it.onSelect}>
-							{it.icon}
-							<span>{it.label}</span>
-						</button>
-					))
-				) : context.kind === "compress" ? (
-					<>
-						<button className={btn} disabled={busy} onClick={() => void confirmCompress(qc, ids.length, context.maxPixels, () => run(() => compressOriginals(qc, ids, context.maxPixels), compressDone))}>
-							<IconCompress />
-							<span>{t.compress.action}</span>
-						</button>
-						<button className={btn} disabled={busy} onClick={() => download(ids)}>
-							<IconDownload />
-							<span className={label}>{t.actions.download}</span>
-						</button>
-						<button
-							className={`${btn} text-danger`}
-							disabled={busy}
-							onClick={() => confirmTrash(ids.length, () => run(() => batch(qc, ids, { action: "trash" })))}
-						>
-							<IconTrash />
-							<span className={label}>{t.actions.delete}</span>
-						</button>
-					</>
-				) : context.kind === "trash" ? (
-					<>
-						<button className={btn} disabled={busy} onClick={() => run(() => batch(qc, ids, { action: "restore" }))}>
-							<IconRestore />
-							<span className={label}>{t.actions.restore}</span>
-						</button>
-						<button
-							className={`${btn} text-danger`}
-							disabled={busy}
-							onClick={() => confirmDeleteForever(ids.length, () => run(() => batch(qc, ids, { action: "delete-forever" })))}
-						>
-							<IconTrash />
-							<span className={label}>{t.actions.deleteForever}</span>
-						</button>
-					</>
-				) : (
-					<>
-						<button className={btn} disabled={busy} onClick={() => run(() => batch(qc, ids, { action: "favorite", value: true }))}>
-							<IconHeart />
-							<span className={label}>{t.actions.favorite}</span>
-						</button>
-						<button className={btn} disabled={busy} onClick={() => pick("album", ids)}>
-							<IconAlbum />
-							<span className={label}>{t.actions.addToAlbum}</span>
-						</button>
-						{archive.map((a) => (
-							<button key={a.label} className={`${btn} ${archiveInBar ? "" : desktopOnly}`} disabled={busy} onClick={a.onSelect}>
+			<button className={btn} onClick={clear} aria-label={t.library.deselect}>
+				<IconClose />
+			</button>
+			<span className="mr-auto whitespace-nowrap pl-1 pr-3 text-sm font-semibold sm:text-base">
+				{selected.size >= MAX_SELECTION ? t.actions.selectedAtLimit(selected.size) : t.actions.selected(selected.size)}
+			</span>
+			{context.kind === "person" ? (
+				personItems(
+					context,
+					() => void run(() => removeFromPerson(qc, context.personId, ids)),
+					() => pick("person", ids),
+				).map((it) => (
+					<button key={it.label} className={btn} disabled={busy} onClick={it.onSelect}>
+						{it.icon}
+						<span>{it.label}</span>
+					</button>
+				))
+			) : context.kind === "smartSet" ? (
+				smartSetItems(context, (l) => run(() => setSmartSetExamples(qc, context.setId, ids, l), sampleDone(l))).map((it) => (
+					<button key={it.label} className={btn} disabled={busy} onClick={it.onSelect}>
+						{it.icon}
+						<span>{it.label}</span>
+					</button>
+				))
+			) : context.kind === "compress" ? (
+				<>
+					<button className={btn} disabled={busy} onClick={() => void confirmCompress(qc, ids.length, context.maxPixels, () => run(() => compressOriginals(qc, ids, context.maxPixels), compressDone))}>
+						<IconCompress />
+						<span>{t.compress.action}</span>
+					</button>
+					<button className={btn} disabled={busy} onClick={() => download(ids)}>
+						<IconDownload />
+						<span className={label}>{t.actions.download}</span>
+					</button>
+					<button
+						className={`${btn} text-danger`}
+						disabled={busy}
+						onClick={() => confirmTrash(ids.length, () => run(() => batch(qc, ids, { action: "trash" })))}
+					>
+						<IconTrash />
+						<span className={label}>{t.actions.delete}</span>
+					</button>
+				</>
+			) : context.kind === "trash" ? (
+				<>
+					<button className={btn} disabled={busy} onClick={() => run(() => batch(qc, ids, { action: "restore" }))}>
+						<IconRestore />
+						<span className={label}>{t.actions.restore}</span>
+					</button>
+					<button
+						className={`${btn} text-danger`}
+						disabled={busy}
+						onClick={() => confirmDeleteForever(ids.length, () => run(() => batch(qc, ids, { action: "delete-forever" })))}
+					>
+						<IconTrash />
+						<span className={label}>{t.actions.deleteForever}</span>
+					</button>
+				</>
+			) : (
+				<>
+					{archiveInBar &&
+						archive.map((a) => (
+							<button key={a.label} className={btn} disabled={busy} onClick={a.onSelect}>
 								<IconArchive />
 								<span className={label}>{a.label}</span>
 							</button>
 						))}
-						<button className={`${btn} ${desktopOnly}`} disabled={busy} onClick={() => pick("folder", ids)}>
-							<IconFolderMove />
-							<span className={label}>{t.actions.move}</span>
-						</button>
-						<button className={`${btn} ${desktopOnly}`} disabled={busy} onClick={() => pick("smartSet", ids)}>
-							<IconSimilar />
-							<span className={label}>{t.actions.topic}</span>
-						</button>
-						<button className={`${btn} ${desktopOnly}`} disabled={busy} onClick={() => pick("meta", ids)}>
-							<IconEdit />
-							<span className={label}>{t.actions.timeAndPlace}</span>
-						</button>
-						<button className={`${btn} ${desktopOnly}`} disabled={busy} onClick={composeAction.onSelect}>
-							{ids.length > 1 ? <IconStitch /> : <IconSplit />}
-							<span className={label}>{ids.length > 1 ? t.compose.stitch : t.compose.split}</span>
-						</button>
-						<button className={btn} disabled={busy} onClick={() => download(ids)}>
-							<IconDownload />
-							<span className={label}>{t.actions.download}</span>
-						</button>
-						{context.kind === "album" && (
-							<button className={`${btn} ${desktopOnly}`} disabled={busy} onClick={() => run(() => removeFromAlbum(qc, context.albumId, ids))}>
-								<IconClose />
-								<span className={label}>{t.actions.removeFromAlbum}</span>
-							</button>
-						)}
-						{context.kind === "topicResults" && (
-							<button
-								className={`${btn} ${desktopOnly}`}
-								disabled={busy}
-								onClick={() => run(() => setSmartSetExamples(qc, context.setId, ids, -1), t.actions.markedNegative)}
-							>
-								<IconClose />
-								<span className={label}>{t.actions.notInTopic}</span>
-							</button>
-						)}
-						<button
-							className={`${btn} text-danger`}
-							disabled={busy}
-							onClick={() => confirmTrash(ids.length, () => run(() => batch(qc, ids, { action: "trash" })))}
-						>
-							<IconTrash />
-							<span className={label}>{t.actions.delete}</span>
-						</button>
-						<button className={`${btn} sm:hidden`} disabled={busy} aria-label={t.actions.more} onClick={(e) => openMenuAt(e.currentTarget, more)}>
-							<IconMore />
-						</button>
-					</>
-				)}
-			</div>
+					<button className={btn} disabled={busy} onClick={() => run(() => batch(qc, ids, { action: "favorite", value: true }))}>
+						<IconHeart />
+						<span className={label}>{t.actions.favorite}</span>
+					</button>
+					<button className={btn} disabled={busy} onClick={() => pick("album", ids)}>
+						<IconAlbum />
+						<span className={label}>{t.actions.addToAlbum}</span>
+					</button>
+					<button
+						className={`${btn} text-danger`}
+						disabled={busy}
+						onClick={() => confirmTrash(ids.length, () => run(() => batch(qc, ids, { action: "trash" })))}
+					>
+						<IconTrash />
+						<span className={label}>{t.actions.delete}</span>
+					</button>
+					<button
+						className={btn}
+						disabled={busy}
+						aria-haspopup="menu"
+						aria-label={t.actions.more}
+						onClick={(e) => openMenuAt(e.currentTarget, more)}
+					>
+						<IconMore />
+						<span className={label}>{t.actions.moreShort}</span>
+					</button>
+				</>
+			)}
 		</div>
 	);
 }
