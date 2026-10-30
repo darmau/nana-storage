@@ -73,7 +73,7 @@ const startOf = (order: string[], id: string, sizes: Map<string, number>) => {
 /** 拼接：拖动照片调整顺序，选方向，预览拼好的样子。ids 是选中的顺序。 */
 export function StitchDialog({ ids, onClose, onConfirm }: { ids: string[]; onClose: () => void; onConfirm: (ids: string[], direction: ComposeDirection) => void }) {
 	const [order, setOrder] = useState(ids);
-	const [direction, setDirection] = useState<ComposeDirection>("vertical");
+	const [direction, setDirection] = useState<ComposeDirection>("horizontal");
 	const details = useQueries({ queries: ids.slice(0, COMPOSE_STITCH_MAX).map(detailQuery) });
 	const byId = new Map(details.flatMap((q) => (q.data ? [[q.data.id, q.data] as const] : [])));
 	const failed = details.find((q) => q.error);
