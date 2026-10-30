@@ -282,6 +282,20 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [go, requestClose, favorite, context, immersive, detail.data, edit.pending]);
 
+	// iOS 主屏幕 PWA 上，页面不在顶部时下滑关闭，之后整片空白，要再摸一下屏幕才重新绘制（按钮关闭、页面在顶部时都没事）。
+	// 推测是系统没有完全遵守 touch-action: none，把这次下滑当成下面页面的滚动，而 body 是 overflow: hidden，页面自己不知道。
+	// 照片区域的 touchmove 一律 preventDefault（Pointer Events 照常派发），不让系统拿去滚动；控件（视频进度条等）不拦。
+	const stageRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		const el = stageRef.current;
+		if (!el) return;
+		const onTouchMove = (e: TouchEvent) => {
+			if (e.cancelable && !(e.target as HTMLElement).closest("button, a, video, aside, [data-chrome]")) e.preventDefault();
+		};
+		el.addEventListener("touchmove", onTouchMove, { passive: false });
+		return () => el.removeEventListener("touchmove", onTouchMove);
+	}, []);
+
 	// 滑动：照片跟手，左右切换，下滑关闭；放大时拖动平移。移动超过 8px 才确定方向，之后只沿这个方向动
 	const drag = useRef<{ x: number; y: number; zx: number; zy: number; t: number; axis: "x" | "y" | null } | null>(null);
 	/** 按钮、工具栏这些控件上的操作不算点在照片上 */
@@ -375,6 +389,7 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 			aria-label={t.viewer.dialog}
 		>
 			<div
+				ref={stageRef}
 				className="relative flex-1 touch-none select-none overflow-hidden"
 				onPointerDown={onPointerDown}
 				onPointerMove={onPointerMove}
