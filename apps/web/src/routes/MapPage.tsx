@@ -48,16 +48,15 @@ export function MapPage() {
 		let markers: { el: HTMLElement; lng: number; lat: number }[] = [];
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		let controller: AbortController | undefined;
-		let raf = 0;
 
+		// move 事件在 MapLibre 绘制这一帧之前同步触发，这里直接改位置，和画布同一帧生效；
+		// 推迟到 requestAnimationFrame 会落后一帧，拖动时标记跟在地图后面。
 		const place = () => {
-			raf = 0;
 			for (const m of markers) {
 				const p = map.project([m.lng, m.lat]);
-				m.el.style.transform = `translate(${p.x - 28}px, ${p.y - 28}px)`;
+				m.el.style.transform = `translate(${Math.round(p.x - 28)}px, ${Math.round(p.y - 28)}px)`;
 			}
 		};
-		const onMove = () => (raf ||= requestAnimationFrame(place));
 
 		const refresh = async () => {
 			const b = map.getBounds();
@@ -90,16 +89,15 @@ export function MapPage() {
 			timer = setTimeout(refresh, 250);
 		};
 		map.on("moveend", schedule);
-		map.on("move", onMove);
-		map.on("resize", onMove);
+		map.on("move", place);
+		map.on("resize", place);
 		map.once("load", schedule);
 		if (map.loaded()) schedule();
 		return () => {
 			map.off("moveend", schedule);
-			map.off("move", onMove);
-			map.off("resize", onMove);
+			map.off("move", place);
+			map.off("resize", place);
 			clearTimeout(timer);
-			cancelAnimationFrame(raf);
 			controller?.abort();
 			for (const m of markers) m.el.remove();
 		};
@@ -153,8 +151,9 @@ export function MapPage() {
 function markerElement(p: Point, onClick: () => void): HTMLElement {
 	const el = document.createElement("button");
 	el.type = "button";
+	// 过渡只给悬停的 scale 和边框：位置每帧由 transform 设置，不能带过渡，否则标记会慢慢追着地图走
 	el.className =
-		"pointer-events-auto absolute left-0 top-0 h-14 w-14 rounded-2xl border-[3px] border-white bg-neutral-300 shadow-[0_2px_10px_rgb(0_0_0/0.3)] transition hover:scale-105 hover:border-accent";
+		"pointer-events-auto absolute left-0 top-0 h-14 w-14 rounded-2xl border-[3px] border-white bg-neutral-300 shadow-[0_2px_10px_rgb(0_0_0/0.3)] transition-[scale,border-color] hover:scale-105 hover:border-accent";
 	el.setAttribute("aria-label", t.map.marker(p.count));
 	el.dataset.photoMarker = "";
 	const img = document.createElement("img");
