@@ -145,11 +145,15 @@ describe("perceptual hash", () => {
 		expect(groupDuplicates([row("a"), row("b")], { ignored: new Set([pairKey("b", "a")]) })).toEqual([]);
 	});
 
-	it("keeps favorites, then RAW, then the largest", () => {
-		const base = { traits: 0, favorite: 0, width: 4000, height: 3000, size: 100, created_at: 0 };
+	it("keeps favorites, then Live Photos, then RAW, then the largest", () => {
+		const base = { kind: "photo", traits: 0, favorite: 0, width: 4000, height: 3000, size: 100, created_at: 0 };
 		expect(pickKeeper([{ ...base, id: "a" }, { ...base, id: "b", width: 8000 }]).id).toBe("b");
 		expect(pickKeeper([{ ...base, id: "a", width: 8000 }, { ...base, id: "b", traits: 8 }]).id).toBe("b");
 		expect(pickKeeper([{ ...base, id: "a", traits: 8 }, { ...base, id: "b", favorite: 1 }]).id).toBe("b");
+		// 同一张照片的静态副本（JPEG 往往比 HEIC 大、尺寸相同）不能把 Live Photo 挤掉
+		expect(pickKeeper([{ ...base, id: "a", size: 900 }, { ...base, id: "b", kind: "live" }]).id).toBe("b");
+		expect(pickKeeper([{ ...base, id: "a", width: 8000, traits: 8 }, { ...base, id: "b", kind: "live" }]).id).toBe("b");
+		expect(pickKeeper([{ ...base, id: "a", kind: "live" }, { ...base, id: "b", favorite: 1 }]).id).toBe("b");
 		expect(pickKeeper([{ ...base, id: "a", created_at: 5 }, { ...base, id: "b", created_at: 1 }]).id).toBe("b");
 	});
 });

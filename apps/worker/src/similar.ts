@@ -449,9 +449,9 @@ async function loadVectors(env: Env, ids: string[]): Promise<Map<string, Float32
 	return out;
 }
 
-/** 推荐保留的一张：收藏的 > 有 RAW 的 > 像素最多的 > 文件最大的 > 最早导入的。 */
-export function pickKeeper<T extends Pick<DupRow, "id" | "favorite" | "traits" | "width" | "height" | "size" | "created_at">>(group: T[]): T {
-	const rank = (r: T) => [r.favorite ? 1 : 0, r.traits & 8 ? 1 : 0, (r.width ?? 0) * (r.height ?? 0), r.size ?? 0, -r.created_at];
+/** 推荐保留的一张：收藏的 > Live Photo（动态部分删了找不回来）> 有 RAW 的 > 像素最多的 > 文件最大的 > 最早导入的。 */
+export function pickKeeper<T extends Pick<DupRow, "id" | "kind" | "favorite" | "traits" | "width" | "height" | "size" | "created_at">>(group: T[]): T {
+	const rank = (r: T) => [r.favorite ? 1 : 0, r.kind === "live" ? 1 : 0, r.traits & 8 ? 1 : 0, (r.width ?? 0) * (r.height ?? 0), r.size ?? 0, -r.created_at];
 	return group.reduce((best, r) => {
 		const a = rank(r);
 		const b = rank(best);

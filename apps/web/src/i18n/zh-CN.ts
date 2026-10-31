@@ -614,7 +614,7 @@ export const zhCN = {
 		trashMessage: (groups: number) => `${groups} 组里每组保留推荐的那一张，其余移到回收站，30 天内可以恢复。`,
 		keepRecommendedAll: (pageOnly: boolean) => `${pageOnly ? "本页" : ""}每组只留推荐的`,
 		intro:
-			"缩小、重新压缩、转换格式或轻微裁剪过的副本会列为重复。每组按收藏、有 RAW、分辨率、文件大小的顺序推荐保留一张；同一组连拍、拍摄时间不同的不算重复。点开一组逐张对比，其实不同的标记为“不是重复”后不再出现。",
+			"缩小、重新压缩、转换格式或轻微裁剪过的副本会列为重复。每组按收藏、Live Photo、有 RAW、分辨率、文件大小的顺序推荐保留一张；同一组连拍、拍摄时间不同的不算重复。点开一组逐张对比，其实不同的标记为“不是重复”后不再出现。",
 		trashed: (n: number) => `已把 ${n} 张移到回收站。`,
 		scanned: (groups: number, scanned: number, truncated: boolean) =>
 			`${groups} 组，检查了 ${fmtNumber(scanned)} 张照片${truncated ? "（照片太多，只检查了一部分）" : ""}。`,

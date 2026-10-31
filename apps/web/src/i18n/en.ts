@@ -612,7 +612,7 @@ export const en: Messages = {
 			`The recommended photo in each of ${count(groups, "group", "groups")} is kept; the rest move to Trash and can be restored within 30 days.`,
 		keepRecommendedAll: (pageOnly: boolean) => (pageOnly ? "Keep only recommended on this page" : "Keep only recommended"),
 		intro:
-			"Resized, recompressed, converted or slightly cropped copies are listed as duplicates. In each group, the photo to keep is recommended by favorite, RAW, resolution, then file size. Photos from the same burst or taken at different times don't count. Open a group to compare; mark photos that actually differ as “Not duplicates” and they won't come back.",
+			"Resized, recompressed, converted or slightly cropped copies are listed as duplicates. In each group, the photo to keep is recommended by favorite, Live Photo, RAW, resolution, then file size. Photos from the same burst or taken at different times don't count. Open a group to compare; mark photos that actually differ as “Not duplicates” and they won't come back.",
 		trashed: (n: number) => `Moved ${count(n, "photo", "photos")} to Trash.`,
 		scanned: (groups: number, scanned: number, truncated: boolean) =>
 			`${count(groups, "group", "groups")}, checked ${count(scanned, "photo", "photos")}${truncated ? " (too many photos, only some were checked)" : ""}.`,
