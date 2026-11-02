@@ -371,9 +371,13 @@ export function FoldersPage() {
 	if (error) return <p className="text-danger">{errorText(error)}</p>;
 	return (
 		<div className="space-y-6">
-			<div className="flex items-center gap-2 pt-1">
+			{/* 手机上路径和按钮分两行（路径占满第一行，按钮靠右放第二行），sm 以上同一行 */}
+			<div className="flex flex-wrap items-center gap-2 pt-1 sm:flex-nowrap">
 				{/* 路径始终一行：上级文件夹限宽截断，当前文件夹占剩下的宽度；手机上只显示上一级，更上面的折叠成“…” */}
-				<nav className="flex min-w-0 flex-1 items-center gap-1 text-xl font-bold tracking-tight sm:text-2xl" aria-label={t.folders.path}>
+				<nav
+					className="flex min-w-0 basis-full items-center gap-1 text-xl font-bold tracking-tight sm:flex-1 sm:basis-auto sm:text-2xl"
+					aria-label={t.folders.path}
+				>
 					<Link to="/folders/$folderId" params={{ folderId: "root" }} className={`shrink-0 ${current ? "text-muted hover:text-fg" : ""}`}>
 						{t.folders.title}
 					</Link>
@@ -397,21 +401,23 @@ export function FoldersPage() {
 						);
 					})}
 				</nav>
-				<SortMenuButton sort={sort} />
-				<ViewToggle view={view} />
-				<SlideshowButton key={listKey} source={source} />
-				{/* 上传在顶栏的“上传”里（在文件夹页面会传到这个文件夹），这里不重复 */}
-				<PageActions
-					actions={[{ label: t.folders.newFolder, icon: <IconPlus size={18} />, onSelect: create }]}
-					menu={
-						current
-							? [
-									{ label: t.folders.renameFolder, icon: <IconEdit size={18} />, onSelect: rename },
-									{ label: t.folders.deleteFolder, icon: <IconTrash size={18} />, danger: true, onSelect: remove },
-								]
-							: []
-					}
-				/>
+				<div className="ml-auto flex shrink-0 items-center gap-2">
+					<SortMenuButton sort={sort} />
+					<ViewToggle view={view} />
+					<SlideshowButton key={listKey} source={source} />
+					{/* 上传在顶栏的“上传”里（在文件夹页面会传到这个文件夹），这里不重复 */}
+					<PageActions
+						actions={[{ label: t.folders.newFolder, icon: <IconPlus size={18} />, onSelect: create }]}
+						menu={
+							current
+								? [
+										{ label: t.folders.renameFolder, icon: <IconEdit size={18} />, onSelect: rename },
+										{ label: t.folders.deleteFolder, icon: <IconTrash size={18} />, danger: true, onSelect: remove },
+									]
+								: []
+						}
+					/>
+				</div>
 			</div>
 			<FolderPeople folderId={folderId} value={person} onChange={setPerson} />
 			<ListFilters type={type} setType={setType} showArchived={showArchived} setShowArchived={setShowArchived} />
@@ -782,7 +788,7 @@ export function AlbumPage() {
 	);
 }
 
-/** 文件夹 / 相册页头下的筛选：类型筛选条（窄屏可以横向滑动）+ 右边的“显示归档照片” */
+/** 文件夹 / 相册页头下的筛选：类型筛选条（窄屏可以横向滑动）+ “显示归档照片”（手机上在下一行，sm 以上在右边） */
 function ListFilters({
 	type,
 	setType,
@@ -795,11 +801,13 @@ function ListFilters({
 	setShowArchived: (show: boolean) => void;
 }) {
 	return (
-		<div className="flex items-center gap-3">
-			<div className="min-w-0 flex-1">
+		<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+			<div className="min-w-0 sm:flex-1">
 				<TypeFilter value={type} onChange={setType} />
 			</div>
-			<ShowArchivedToggle value={showArchived} onChange={setShowArchived} />
+			<div className="self-start sm:self-auto">
+				<ShowArchivedToggle value={showArchived} onChange={setShowArchived} />
+			</div>
 		</div>
 	);
 }
