@@ -25,8 +25,10 @@ export interface FolderChild {
 	size: number;
 	/** 上次修改（UTC 毫秒）：子树里可见条目最近一次变化，没有照片时是创建时间 */
 	modified: number;
-	/** 九宫格封面，最近拍的最多 9 张（"id:rev"） */
+	/** 九宫格封面，最近拍的最多 9 张（"id:rev"）；设置了自定义封面（而且可见）时只有那一张 */
 	covers: string[];
+	/** 自定义封面的照片 id，没设置是 null */
+	cover_asset_id: string | null;
 }
 export interface UnfinishedAsset {
 	id: string;
@@ -35,7 +37,7 @@ export interface UnfinishedAsset {
 	names: string[];
 }
 export interface FolderInfo {
-	path: { id: string; name: string; parent_id: string | null }[];
+	path: { id: string; name: string; parent_id: string | null; cover_asset_id: string | null }[];
 	children: FolderChild[];
 }
 /** 文件夹里还没处理完的条目，单独请求：文件夹详情带 ETag，这部分和时间有关、上传处理中一直在变。 */

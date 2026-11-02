@@ -7,6 +7,7 @@ import { batch, invalidateLibrary } from "../library/actions";
 import { LibraryList } from "../library/LibraryList";
 import { armLibrarySync } from "../library/sync";
 import { FolderPicker } from "../library/Pickers";
+import { FolderCoverPicker } from "../library/FolderCoverPicker";
 import { ShowArchivedToggle, TypeFilter, listPath, usePersonFilter, useShowArchived, useTypeFilter, withType } from "../library/TypeFilter";
 import {
 	type AlbumSummary,
@@ -33,6 +34,7 @@ import {
 	IconList,
 	IconInfo,
 	IconMore,
+	IconPhotos,
 	IconPlus,
 	IconSlideshow,
 	IconSort,
@@ -355,6 +357,9 @@ export function FoldersPage() {
 			void navigate({ to: "/folders/$folderId", params: { folderId: parent } });
 		});
 	const [moving, setMoving] = useState<FolderChild | null>(null);
+	type CoverTarget = { id: string; name: string; cover_asset_id: string | null };
+	const [coverFor, setCoverFor] = useState<CoverTarget | null>(null);
+	const coverItem = (f: CoverTarget) => ({ label: t.folders.coverMenu, icon: <IconPhotos size={18} />, onSelect: () => setCoverFor(f) });
 	const folderMenu = (e: React.MouseEvent, f: FolderChild) =>
 		openContextMenu(e, [
 			{ label: t.library.open, icon: <IconFolder size={18} />, onSelect: () => void navigate({ to: "/folders/$folderId", params: { folderId: f.id } }) },
@@ -362,6 +367,7 @@ export function FoldersPage() {
 			"sep",
 			{ label: t.common.renameMenu, icon: <IconEdit size={18} />, onSelect: () => void renameFolder(f) },
 			{ label: t.folders.moveMenu, icon: <IconFolderMove size={18} />, onSelect: () => setMoving(f) },
+			coverItem(f),
 			"sep",
 			f.count || unfinishedIn(f) || f.subfolders
 				? { label: t.folders.deleteOnlyEmpty, icon: <IconTrash size={18} />, danger: true, disabled: true, onSelect: () => {} }
@@ -412,6 +418,7 @@ export function FoldersPage() {
 							current
 								? [
 										{ label: t.folders.renameFolder, icon: <IconEdit size={18} />, onSelect: rename },
+										coverItem(current),
 										{ label: t.folders.deleteFolder, icon: <IconTrash size={18} />, danger: true, onSelect: remove },
 									]
 								: []
@@ -451,6 +458,17 @@ export function FoldersPage() {
 						const f = moving;
 						setMoving(null);
 						void mutate(() => api(`/folders/${f.id}`, { method: "PATCH", json: { parentId } }));
+					}}
+				/>
+			)}
+			{coverFor && (
+				<FolderCoverPicker
+					folder={coverFor}
+					onClose={() => setCoverFor(null)}
+					onPick={(coverAssetId) => {
+						const f = coverFor;
+						setCoverFor(null);
+						void mutate(() => api(`/folders/${f.id}`, { method: "PATCH", json: { coverAssetId } }));
 					}}
 				/>
 			)}

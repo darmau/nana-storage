@@ -125,17 +125,19 @@ interface FolderRow {
 	id: string;
 	parent_id: string | null;
 	name: string;
+	/** 自定义封面（照片 id），没设置是 null */
+	cover_asset_id: string | null;
 }
 
 /** 从根到 id 的路径（包括它自己）。一条递归查询；移动时禁止形成环，深度上限只是保险。 */
 async function breadcrumb(env: Env, id: string | null): Promise<FolderRow[]> {
 	if (!id) return [];
 	const { results } = await env.DB.prepare(
-		`WITH RECURSIVE up(id, parent_id, name, depth) AS (
-			SELECT id, parent_id, name, 0 FROM folders WHERE id = ?
+		`WITH RECURSIVE up(id, parent_id, name, cover_asset_id, depth) AS (
+			SELECT id, parent_id, name, cover_asset_id, 0 FROM folders WHERE id = ?
 			UNION ALL
-			SELECT f.id, f.parent_id, f.name, up.depth + 1 FROM folders f JOIN up ON f.id = up.parent_id WHERE up.depth < 39
-		) SELECT id, parent_id, name FROM up ORDER BY depth DESC`,
+			SELECT f.id, f.parent_id, f.name, f.cover_asset_id, up.depth + 1 FROM folders f JOIN up ON f.id = up.parent_id WHERE up.depth < 39
+		) SELECT id, parent_id, name, cover_asset_id FROM up ORDER BY depth DESC`,
 	)
 		.bind(id)
 		.all<FolderRow>();
@@ -144,6 +146,7 @@ async function breadcrumb(env: Env, id: string | null): Promise<FolderRow[]> {
 
 /**
  * GET /api/folders/:id  （id = "root" 表示根目录）→ 面包屑 + 子文件夹（张数、体积、最近修改时间和封面包括所有子文件夹里的，封面最多 9 张）。
+ * 设置了自定义封面（folders.cover_asset_id）而且那张照片可见时，covers 只有它一张；否则照旧是子树里最近拍的几张。
  * 只取决于 folders 和可见的条目，带 ETag（src/dbcache.ts）：打开根目录要按整棵树统计全部照片，没变时只读一行版本号。
  * 还没处理完的条目和时间有关（“上传中断”），而且会在上传、处理中不断变化，单独由 /folders/:id/unfinished 返回。
  */
@@ -186,7 +189,12 @@ library.get("/folders/:id", async (c) => {
 			-- 最近修改：整棵子树里可见条目最近一次变化（加入、编辑、处理），没有照片时是文件夹的创建时间
 			MAX(COALESCE(x.modified, 0), f.created_at) AS modified,
 			(SELECT COUNT(*) FROM folders s WHERE s.parent_id = f.id) AS subfolders,
-			COALESCE(cv.covers, '[]') AS covers
+			f.cover_asset_id,
+			-- 自定义封面按主键读一行；照片在回收站、归档或还没处理好时退回自动封面
+			COALESCE(
+				(SELECT json_array(a.id || ':' || a.derived_rev) FROM assets a WHERE a.id = f.cover_asset_id AND ${VISIBLE} AND ${NOT_ARCHIVED}),
+				cv.covers, '[]'
+			) AS covers
 		 FROM folders f LEFT JOIN totals x ON x.root = f.id LEFT JOIN covers cv ON cv.root = f.id
 		 WHERE COALESCE(f.parent_id, '') = ? ORDER BY f.name COLLATE NOCASE`,
 	)
@@ -329,9 +337,17 @@ library.post("/folders", async (c) => {
 
 library.patch("/folders/:id", async (c) => {
 	const id = ID.parse(c.req.param("id"));
-	const body = z.object({ name: z.string().min(1).max(255).optional(), parentId: ID.nullable().optional() }).parse(await c.req.json());
-	const folder = await c.env.DB.prepare("SELECT id, parent_id, name FROM folders WHERE id = ?").bind(id).first<FolderRow>();
+	const body = z
+		.object({ name: z.string().min(1).max(255).optional(), parentId: ID.nullable().optional(), coverAssetId: ID.nullable().optional() })
+		.parse(await c.req.json());
+	const folder = await c.env.DB.prepare("SELECT id, parent_id, name, cover_asset_id FROM folders WHERE id = ?").bind(id).first<FolderRow>();
 	if (!folder) return c.json({ error: "not found" }, 404);
+	// 封面可以是任意一张可见的照片（不要求在这个文件夹里）；null 恢复自动封面
+	if (body.coverAssetId) {
+		const ok = await c.env.DB.prepare(`SELECT 1 FROM assets a WHERE a.id = ? AND ${VISIBLE}`).bind(body.coverAssetId).first();
+		if (!ok) return c.json({ error: "asset not found" }, 404);
+	}
+	const cover = body.coverAssetId !== undefined ? body.coverAssetId : folder.cover_asset_id;
 
 	const name = body.name !== undefined ? cleanFolderName(body.name) : folder.name;
 	if (!name) return c.json({ error: "bad name" }, 400);
@@ -343,12 +359,12 @@ library.patch("/folders/:id", async (c) => {
 		if (chain.some((f) => f.id === id)) return c.json({ error: "cannot move a folder into itself" }, 400);
 	}
 	try {
-		await c.env.DB.prepare("UPDATE folders SET name = ?, parent_id = ? WHERE id = ?").bind(name, parentId, id).run();
+		await c.env.DB.prepare("UPDATE folders SET name = ?, parent_id = ?, cover_asset_id = ? WHERE id = ?").bind(name, parentId, cover, id).run();
 	} catch (e) {
 		if (String(e).includes("UNIQUE")) return c.json({ error: "a folder with this name already exists" }, 409);
 		throw e;
 	}
-	return c.json({ id, name, parentId });
+	return c.json({ id, name, parentId, coverAssetId: cover });
 });
 
 /** 只能删除空文件夹（没有子文件夹，也没有未删除的照片）。回收站里的照片会变成“不在任何文件夹”。 */

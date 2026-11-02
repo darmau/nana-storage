@@ -132,6 +132,46 @@ describe("folders", () => {
 		expect(root.json.children[1].covers).toEqual([]);
 	});
 
+	it("uses a custom cover from any folder, falls back when it is hidden, and can be cleared", async () => {
+		const a = await call("POST", "/folders", { name: "A" });
+		const a1 = await call("POST", "/folders", { name: "A1", parentId: a.json.id });
+		const b = await call("POST", "/folders", { name: "B" });
+		for (let n = 1; n <= 4; n++) await seed(n, { folder: a1.json.id });
+		await seed(5, { folder: b.json.id });
+		const auto = [4, 3, 2, 1].map((n) => `${id(n)}:0`);
+		const card = async (name: string) =>
+			(await call("GET", "/folders/root")).json.children.find((f: { name: string }) => f.name === name);
+
+		// 子文件夹里的、别的文件夹里的照片都可以
+		expect((await call("PATCH", `/folders/${a.json.id}`, { coverAssetId: id(2) })).status).toBe(200);
+		expect(await card("A")).toMatchObject({ cover_asset_id: id(2), covers: [`${id(2)}:0`] });
+		await call("PATCH", `/folders/${a.json.id}`, { coverAssetId: id(5) });
+		expect((await card("A")).covers).toEqual([`${id(5)}:0`]);
+		// 当前文件夹的面包屑也带上封面，页头菜单用
+		expect((await call("GET", `/folders/${a.json.id}`)).json.path.at(-1).cover_asset_id).toBe(id(5));
+		// 改名、移动不影响封面
+		await call("PATCH", `/folders/${a.json.id}`, { name: "AA" });
+		expect((await card("AA")).cover_asset_id).toBe(id(5));
+
+		// 封面照片进了回收站：退回自动封面，设置保留
+		await call("POST", "/assets/batch", { ids: [id(5)], action: "trash" });
+		expect(await card("AA")).toMatchObject({ cover_asset_id: id(5), covers: auto });
+		// 不能设成不可见的照片
+		expect((await call("PATCH", `/folders/${a.json.id}`, { coverAssetId: id(5) })).status).toBe(404);
+		expect((await call("PATCH", `/folders/${a.json.id}`, { coverAssetId: id(99) })).status).toBe(404);
+
+		// 永久删除：外键置空
+		await call("PATCH", `/folders/${a.json.id}`, { coverAssetId: id(1) });
+		await call("POST", "/assets/batch", { ids: [id(1)], action: "trash" });
+		await call("POST", "/assets/batch", { ids: [id(1)], action: "delete-forever" });
+		expect((await card("AA")).cover_asset_id).toBeNull();
+
+		// 清除
+		await call("PATCH", `/folders/${a.json.id}`, { coverAssetId: id(3) });
+		await call("PATCH", `/folders/${a.json.id}`, { coverAssetId: null });
+		expect(await card("AA")).toMatchObject({ cover_asset_id: null, covers: [4, 3, 2].map((n) => `${id(n)}:0`) });
+	});
+
 	it("rejects duplicate names and moving a folder into its own subtree", async () => {
 		const a = await call("POST", "/folders", { name: "A" });
 		expect((await call("POST", "/folders", { name: "A" })).status).toBe(409);
