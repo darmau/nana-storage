@@ -21,7 +21,7 @@ import {
 	listQuery,
 } from "../library/queries";
 import { alertDialog, confirmDialog, promptDialog } from "../ui/confirm";
-import { type MenuItem, openContextMenu, openMenuAt } from "../ui/ContextMenu";
+import { type MenuItem, menuTriggerProps, openContextMenu, openMenuAt } from "../ui/ContextMenu";
 import {
 	IconAlbum,
 	IconArchive,
@@ -142,7 +142,7 @@ function FolderRows({
 }: {
 	folders: FolderChild[];
 	unfinishedIn: (f: FolderChild) => number;
-	onMenu: (e: React.MouseEvent, f: FolderChild) => void;
+	onMenu: (f: FolderChild) => MenuItem[];
 }) {
 	const cell = "hidden text-right text-sm tabular-nums text-muted sm:block";
 	return (
@@ -164,8 +164,9 @@ function FolderRows({
 							<Link
 								to="/folders/$folderId"
 								params={{ folderId: f.id }}
-								className={`${FOLDER_COLS} h-14 rounded-lg hover:bg-surface`}
-								onContextMenu={(e) => onMenu(e, f)}
+								// iOS 长按链接会弹出系统预览并选中文字，这里长按是右键菜单
+								className={`${FOLDER_COLS} h-14 select-none rounded-lg hover:bg-surface [-webkit-touch-callout:none]`}
+								{...menuTriggerProps(() => onMenu(f))}
 							>
 								<span className="flex h-10 w-10 items-center justify-center text-[#b7791f] dark:text-[#f2c66d]">
 									<IconFolder size={26} />
@@ -360,19 +361,18 @@ export function FoldersPage() {
 	type CoverTarget = { id: string; name: string; cover_asset_id: string | null };
 	const [coverFor, setCoverFor] = useState<CoverTarget | null>(null);
 	const coverItem = (f: CoverTarget) => ({ label: t.folders.coverMenu, icon: <IconPhotos size={18} />, onSelect: () => setCoverFor(f) });
-	const folderMenu = (e: React.MouseEvent, f: FolderChild) =>
-		openContextMenu(e, [
-			{ label: t.library.open, icon: <IconFolder size={18} />, onSelect: () => void navigate({ to: "/folders/$folderId", params: { folderId: f.id } }) },
-			...uploadMenuItems(f.id, "here"),
-			"sep",
-			{ label: t.common.renameMenu, icon: <IconEdit size={18} />, onSelect: () => void renameFolder(f) },
-			{ label: t.folders.moveMenu, icon: <IconFolderMove size={18} />, onSelect: () => setMoving(f) },
-			coverItem(f),
-			"sep",
-			f.count || unfinishedIn(f) || f.subfolders
-				? { label: t.folders.deleteOnlyEmpty, icon: <IconTrash size={18} />, danger: true, disabled: true, onSelect: () => {} }
-				: { label: t.actions.delete, icon: <IconTrash size={18} />, danger: true, onSelect: () => void removeFolder(f) },
-		]);
+	const folderMenu = (f: FolderChild): MenuItem[] => [
+		{ label: t.library.open, icon: <IconFolder size={18} />, onSelect: () => void navigate({ to: "/folders/$folderId", params: { folderId: f.id } }) },
+		...uploadMenuItems(f.id, "here"),
+		"sep",
+		{ label: t.common.renameMenu, icon: <IconEdit size={18} />, onSelect: () => void renameFolder(f) },
+		{ label: t.folders.moveMenu, icon: <IconFolderMove size={18} />, onSelect: () => setMoving(f) },
+		coverItem(f),
+		"sep",
+		f.count || unfinishedIn(f) || f.subfolders
+			? { label: t.folders.deleteOnlyEmpty, icon: <IconTrash size={18} />, danger: true, disabled: true, onSelect: () => {} }
+			: { label: t.actions.delete, icon: <IconTrash size={18} />, danger: true, onSelect: () => void removeFolder(f) },
+	];
 
 	if (error) return <p className="text-danger">{errorText(error)}</p>;
 	return (
@@ -436,7 +436,7 @@ export function FoldersPage() {
 				<ul className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7">
 					{data.children.map((f) => (
 						<li key={f.id}>
-							<Link to="/folders/$folderId" params={{ folderId: f.id }} className="block space-y-1.5" onContextMenu={(e) => folderMenu(e, f)}>
+							<Link to="/folders/$folderId" params={{ folderId: f.id }} className="block select-none space-y-1.5 [-webkit-touch-callout:none]" {...menuTriggerProps(() => folderMenu(f))}>
 								<FolderCover covers={f.covers} />
 								<div className="truncate text-sm font-semibold">{f.name}</div>
 								<div className="text-xs text-muted">

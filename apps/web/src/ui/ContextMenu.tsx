@@ -3,7 +3,8 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 /**
  * 右键菜单。全局只有一个，由 <ContextMenuHost /> 渲染；任何地方调用 openContextMenu(e, items) 打开。
  * openMenuAt(按钮, items) 把同一个菜单挂在按钮下方（页头和多选栏的“更多”），下方放不下时挂在按钮上方。
- * 点击外面、Esc、滚动、窗口变化都会关闭。触屏不弹（长按已经用来多选）。
+ * 点击外面、Esc、滚动、窗口变化都会关闭。照片格子在触屏上不弹（长按已经用来多选）；
+ * 其他卡片（文件夹）用 menuTriggerProps() 让触屏长按也能打开。
  */
 
 export type MenuItem =
@@ -36,6 +37,55 @@ export function openContextMenu(e: React.MouseEvent, items: MenuItem[]) {
 	e.preventDefault();
 	e.stopPropagation();
 	set({ x: e.clientX, y: e.clientY, items });
+}
+
+/**
+ * 右键和触屏长按都打开同一个菜单，展开到链接 / 按钮上。iOS Safari 长按不触发 contextmenu，
+ * 所以触屏一律自己计时（Android 的 contextmenu 吞掉，避免开两次）；手指移动超过 LONG_PRESS_SLOP 算滚动，取消。
+ * 长按打开后吞掉随后的 click，不跟着打开链接。同一时刻只有一根手指在按，计时状态放在模块里，列表里每一项都能用。
+ */
+const LONG_PRESS_MS = 450;
+const LONG_PRESS_SLOP = 10;
+let press: { timer: ReturnType<typeof setTimeout>; x: number; y: number; fired: boolean } | null = null;
+let lastPointer = "mouse";
+const cancelPress = () => press && !press.fired && (clearTimeout(press.timer), (press = null));
+
+export function menuTriggerProps(items: () => MenuItem[]) {
+	return {
+		onPointerDown: (e: React.PointerEvent) => {
+			lastPointer = e.pointerType;
+			if (press) clearTimeout(press.timer);
+			press = null;
+			if (e.pointerType !== "touch") return;
+			const { clientX: x, clientY: y } = e;
+			const p = {
+				x,
+				y,
+				fired: false,
+				timer: setTimeout(() => {
+					p.fired = true;
+					navigator.vibrate?.(10);
+					set({ x, y, items: items() });
+				}, LONG_PRESS_MS),
+			};
+			press = p;
+		},
+		onPointerMove: (e: React.PointerEvent) => {
+			if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > LONG_PRESS_SLOP) cancelPress();
+		},
+		onPointerUp: cancelPress,
+		onPointerCancel: cancelPress,
+		onClick: (e: React.MouseEvent) => {
+			if (!press?.fired) return;
+			press = null;
+			e.preventDefault();
+			e.stopPropagation();
+		},
+		onContextMenu: (e: React.MouseEvent) => {
+			if (lastPointer === "touch") return e.preventDefault();
+			openContextMenu(e, items());
+		},
+	};
 }
 
 /** 在按钮下方打开，右边缘和按钮对齐 */
