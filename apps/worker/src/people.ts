@@ -627,6 +627,16 @@ people.patch("/people/:id", async (c) => {
 	return c.json(personJson(row!, (await covers(c.env, [row!])).get(id)));
 });
 
+/** 批量隐藏 / 取消隐藏（人物列表的多选）。每次最多 CHUNK 个，前端按这个上限分批。 */
+people.post("/people/hidden", async (c) => {
+	const { ids, hidden } = z.object({ ids: z.array(ID).min(1).max(CHUNK), hidden: z.boolean() }).parse(await c.req.json());
+	const list = [...new Set(ids)];
+	const { results } = await c.env.DB.prepare(`UPDATE people SET hidden = ?, updated_at = ? WHERE id IN (${marks(list.length)}) AND hidden != ? RETURNING id`)
+		.bind(hidden ? 1 : 0, Date.now(), ...list, hidden ? 1 : 0)
+		.all<{ id: string }>();
+	return c.json({ updated: results.length });
+});
+
 /** 把 ids 这几个人物合并进 :id。名字、封面以 :id 为准（:id 没有名字时用第一个有名字的）。 */
 people.post("/people/:id/merge", async (c) => {
 	const id = ID.parse(c.req.param("id"));

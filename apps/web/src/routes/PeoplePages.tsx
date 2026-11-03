@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import { t } from "../i18n";
 import { LibraryList } from "../library/LibraryList";
@@ -11,7 +11,7 @@ import { PersonPicker } from "../people/PersonPicker";
 import { ReviewDialog } from "../people/ReviewDialog";
 import { alertDialog, confirmDialog } from "../ui/confirm";
 import { type MenuItem, openContextMenu } from "../ui/ContextMenu";
-import { IconCheck, IconChevronRight, IconEdit, IconEyeOff, IconHeart, IconMerge, IconPeople } from "../ui/icons";
+import { IconCheck, IconChevronRight, IconClose, IconEdit, IconEyeOff, IconHeart, IconMerge, IconPeople } from "../ui/icons";
 import { PageActions, SlideshowButton } from "./LibraryPages";
 import { PeopleSkeleton } from "../ui/Skeleton";
 import { useDocumentTitle } from "../ui/title";
@@ -93,6 +93,18 @@ export function PeoplePage() {
 	const { actions, dialogs } = usePersonActions();
 	const navigate = useNavigate();
 	const qc = useQueryClient();
+	// 多选（批量隐藏 / 取消隐藏）：null 是没在选择
+	const [selected, setSelected] = useState<Set<string> | null>(null);
+	const toggle = (id: string) =>
+		setSelected((prev) => {
+			const next = new Set(prev);
+			if (!next.delete(id)) next.add(id);
+			return next;
+		});
+	const switchList = (hidden: boolean) => {
+		setSelected(null);
+		setShowHidden(hidden);
+	};
 
 	const menu = (e: React.MouseEvent, p: Person) => {
 		const a = actions(p);
@@ -110,13 +122,33 @@ export function PeoplePage() {
 
 	const favorites = showHidden ? [] : (data?.items.filter((p) => p.favorite) ?? []);
 	const others = data?.items.filter((p) => showHidden || !p.favorite) ?? [];
+	const card = (p: Person, big?: boolean) => (
+		<PersonCard
+			key={p.id}
+			person={p}
+			big={big}
+			selected={selected ? selected.has(p.id) : undefined}
+			onToggle={() => toggle(p.id)}
+			onMenu={menu}
+			onName={() => void renamePerson(qc, p)}
+		/>
+	);
 
 	return (
 		<div className="space-y-6">
+			{selected && (
+				<PeopleSelectionBar
+					selected={selected}
+					all={data?.items ?? []}
+					hidden={showHidden}
+					onChange={setSelected}
+					onDone={() => setSelected(null)}
+				/>
+			)}
 			<div className="flex items-center gap-2 pt-1">
 				{showHidden ? (
 					<div className="flex min-w-0 flex-1 items-center gap-1 text-xl font-bold tracking-tight sm:text-2xl">
-						<button className="shrink-0 text-muted hover:text-fg" onClick={() => setShowHidden(false)}>
+						<button className="shrink-0 text-muted hover:text-fg" onClick={() => switchList(false)}>
 							{t.people.title}
 						</button>
 						<IconChevronRight size={20} className="shrink-0 text-muted" />
@@ -126,9 +158,15 @@ export function PeoplePage() {
 					<h1 className="page-title flex-1">{t.people.title}</h1>
 				)}
 				{!showHidden && !!data?.hidden && (
-					<button className="btn" onClick={() => setShowHidden(true)}>
+					<button className="btn" onClick={() => switchList(true)}>
 						<IconEyeOff size={18} />
 						{t.people.hiddenCount(data.hidden)}
+					</button>
+				)}
+				{!!data?.items.length && (
+					<button className="btn" onClick={() => setSelected(new Set())}>
+						<IconCheck size={18} />
+						{t.people.selectPeople}
 					</button>
 				)}
 			</div>
@@ -148,16 +186,12 @@ export function PeoplePage() {
 
 			{favorites.length > 0 && (
 				<ul className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 lg:grid-cols-6">
-					{favorites.map((p) => (
-						<PersonCard key={p.id} person={p} big onMenu={menu} onName={() => void renamePerson(qc, p)} />
-					))}
+					{favorites.map((p) => card(p, true))}
 				</ul>
 			)}
 			{others.length > 0 && (
 				<ul className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-5 lg:grid-cols-7 xl:grid-cols-9">
-					{others.map((p) => (
-						<PersonCard key={p.id} person={p} onMenu={menu} onName={() => void renamePerson(qc, p)} />
-					))}
+					{others.map((p) => card(p))}
 				</ul>
 			)}
 			{dialogs}
@@ -165,28 +199,117 @@ export function PeoplePage() {
 	);
 }
 
-/** 头像 + 名字。未命名的在头像下面显示“添加名字”按钮（不在链接里，点了直接命名）。 */
+/**
+ * 人物列表的多选栏：和照片的多选栏一样盖在顶栏上。人物列表里是“隐藏”，已隐藏列表里是“取消隐藏”。
+ * 按接口的上限每 HIDE_CHUNK 个一次请求，Esc 退出。
+ */
+const HIDE_CHUNK = 90;
+function PeopleSelectionBar({
+	selected,
+	all,
+	hidden,
+	onChange,
+	onDone,
+}: {
+	selected: Set<string>;
+	all: Person[];
+	hidden: boolean;
+	onChange: (s: Set<string>) => void;
+	onDone: () => void;
+}) {
+	const qc = useQueryClient();
+	const [busy, setBusy] = useState(false);
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => e.key === "Escape" && onDone();
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [onDone]);
+
+	const apply = async () => {
+		const ids = [...selected];
+		if (!hidden && !(await confirmDialog({ title: t.people.hideManyTitle(ids.length), message: t.people.hideMessage, confirmLabel: t.people.hide }))) return;
+		setBusy(true);
+		try {
+			for (let i = 0; i < ids.length; i += HIDE_CHUNK)
+				await api("/people/hidden", { method: "POST", json: { ids: ids.slice(i, i + HIDE_CHUNK), hidden: !hidden } });
+			onDone();
+		} catch (e) {
+			void alertDialog(t.people.notSaved, errorText(e));
+		} finally {
+			setBusy(false);
+			invalidatePeople(qc);
+		}
+	};
+
+	const btn =
+		"inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-full px-2.5 text-sm font-medium hover:bg-surface disabled:opacity-50 sm:px-3.5";
+	const allSelected = all.length > 0 && all.every((p) => selected.has(p.id));
+	return (
+		<div
+			role="toolbar"
+			aria-label={t.actions.toolbar}
+			className="bar-in fixed inset-x-0 top-0 z-40 flex h-[var(--header-h)] select-none items-center gap-0.5 overflow-x-auto border-b border-border bg-bg pl-[max(0.5rem,var(--safe-left))] pr-[max(0.5rem,var(--safe-right))] pt-[var(--safe-top)] md:pl-[max(1rem,var(--safe-left))] md:pr-[max(1rem,var(--safe-right))]"
+		>
+			<button className={btn} onClick={onDone} aria-label={t.library.deselect}>
+				<IconClose />
+			</button>
+			<span className="mr-auto whitespace-nowrap pl-1 pr-3 text-sm font-semibold sm:text-base">{t.actions.selected(selected.size)}</span>
+			<button className={btn} disabled={busy} onClick={() => onChange(allSelected ? new Set() : new Set(all.map((p) => p.id)))}>
+				<IconCheck />
+				<span>{allSelected ? t.library.deselect : t.people.selectAll}</span>
+			</button>
+			<button className={btn} disabled={busy || !selected.size} onClick={() => void apply()}>
+				<IconEyeOff />
+				<span>{hidden ? t.people.unhide : t.people.hide}</span>
+			</button>
+		</div>
+	);
+}
+
+/**
+ * 头像 + 名字。未命名的在头像下面显示“添加名字”按钮（不在链接里，点了直接命名）。
+ * selected 不是 undefined 时在多选：点头像是选择，不打开人物页。
+ */
 function PersonCard({
 	person,
 	big,
+	selected,
+	onToggle,
 	onMenu,
 	onName,
 }: {
 	person: Person;
 	big?: boolean;
+	selected?: boolean;
+	onToggle: () => void;
 	onMenu: (e: React.MouseEvent, p: Person) => void;
 	onName: () => void;
 }) {
+	const selecting = selected !== undefined;
 	return (
-		<li className="flex min-w-0 flex-col items-center gap-1.5" onContextMenu={(e) => onMenu(e, person)}>
+		<li className="flex min-w-0 flex-col items-center gap-1.5" onContextMenu={(e) => !selecting && onMenu(e, person)}>
 			<Link
 				to="/people/$personId"
 				params={{ personId: person.id }}
 				className="block w-full rounded-full transition hover:opacity-90"
 				aria-label={t.people.cardLabel(personName(person), person.count)}
+				aria-pressed={selecting ? selected : undefined}
+				onClick={(e) => {
+					if (!selecting) return;
+					e.preventDefault();
+					onToggle();
+				}}
 			>
-				<span className={`mx-auto block aspect-square w-full ${big ? "max-w-36" : "max-w-28"}`}>
-					<FaceAvatar face={person.cover} className="h-full w-full" />
+				<span className={`relative mx-auto block aspect-square w-full ${big ? "max-w-36" : "max-w-28"}`}>
+					<FaceAvatar face={person.cover} className={`h-full w-full transition ${selected ? "scale-[0.86]" : ""}`} />
+					{selecting && (
+						<span
+							aria-hidden="true"
+							className={`absolute bottom-[4%] right-[4%] flex h-6 w-6 items-center justify-center rounded-full border-2 ${selected ? "border-accent bg-accent text-accent-fg" : "border-white bg-black/30"}`}
+						>
+							{selected && <IconCheck size={14} />}
+						</span>
+					)}
 				</span>
 			</Link>
 			{person.name ? (
@@ -194,7 +317,7 @@ function PersonCard({
 					{person.name}
 				</div>
 			) : (
-				<button className="text-sm font-medium text-accent hover:underline" onClick={onName}>
+				<button className="text-sm font-medium text-accent hover:underline disabled:opacity-50" disabled={selecting} onClick={onName}>
 					{t.people.addName}
 				</button>
 			)}

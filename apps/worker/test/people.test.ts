@@ -317,6 +317,16 @@ describe("people API", () => {
 		expect((await call(withIndex(), "GET", "/people?hidden=1")).json.items).toHaveLength(1);
 	});
 
+	it("hides and unhides several people at once", async () => {
+		const { a, b } = await twoPeople();
+		expect((await call(withIndex(), "POST", "/people/hidden", { ids: [a, b, a], hidden: true })).json).toEqual({ updated: 2 });
+		expect((await call(withIndex(), "GET", "/people")).json).toMatchObject({ items: [], hidden: 2 });
+		// 已经是这个状态的不算
+		expect((await call(withIndex(), "POST", "/people/hidden", { ids: [a], hidden: true })).json).toEqual({ updated: 0 });
+		expect((await call(withIndex(), "POST", "/people/hidden", { ids: [b], hidden: false })).json).toEqual({ updated: 1 });
+		expect((await call(withIndex(), "GET", "/people")).json).toMatchObject({ items: [{ id: b }], hidden: 1 });
+	});
+
 	it("sets the cover by face or by photo, and falls back when cleared", async () => {
 		const { a, b } = await twoPeople();
 		const f2 = (await facesOf(aid(2)))[0]!.id;
