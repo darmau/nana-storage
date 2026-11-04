@@ -27,6 +27,12 @@ services:
       - cloudflared:/home/node/.cloudflared
     # 退出时要把手上的任务退回服务器、交还云端
     stop_grace_period: 30s
+    # Docker 默认的 json-file 日志不轮转：常年开着时日志会一直涨，占满磁盘。最多留 3 × 10 MB。
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 volumes:
   data:
   cloudflared:

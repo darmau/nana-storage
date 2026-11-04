@@ -49,6 +49,8 @@ interface Props {
 
 /**
  * 照片格子：点击打开；勾选框或长按（触屏）进入多选；多选时点击就是选择；Shift 点击选上一段。
+ * 没有悬停的设备（手机）上，不在多选时勾选框是看不见的，也不能点（pointer-events-none）：
+ * 否则点到照片左上角会莫名其妙进入多选。手机上靠长按进入多选。
  * 连拍封面（时间线里）代表整组：点击进入连拍页，选择、右键菜单都作用于整组。
  */
 export const Tile = memo(function Tile({ item, top, left, width, height, scope, onOpen: openOne }: Props) {
@@ -143,7 +145,7 @@ export const Tile = memo(function Tile({ item, top, left, width, height, scope, 
 				aria-label={isSelected ? t.library.deselect : t.library.select}
 				onClick={(e) => (e.shiftKey ? extend(id, scope, burst) : toggle(id, scope, burst))}
 				className={`absolute left-1 top-1 flex h-8 w-8 items-center justify-center rounded-full transition ${
-					isSelected || active ? "opacity-100" : "opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+					isSelected || active ? "opacity-100" : "opacity-0 focus-visible:opacity-100 group-hover:opacity-100 pointer-events-none [@media(any-hover:hover)]:pointer-events-auto"
 				}`}
 			>
 				<span

@@ -211,6 +211,8 @@ function finish(entry, status, error) {
 	}
 	const now = Date.now();
 	if (status === "done") state.finishedAt.push(now);
+	// 界面没打开时 publicState() 不会被调用，这里也要裁掉，否则常年开着时这个数组一直涨
+	trimFinished(now);
 	state.history.unshift({
 		jobId: entry.jobId,
 		kind: entry.kind,
@@ -333,9 +335,13 @@ function thumbOf(jobId) {
 
 const slim = ({ token: _t, thumb, ...j }) => ({ ...j, hasThumb: Boolean(thumb) });
 
+function trimFinished(now) {
+	while (state.finishedAt.length && state.finishedAt[0] < now - RATE_WINDOW_MS) state.finishedAt.shift();
+}
+
 function publicState() {
 	const now = Date.now();
-	while (state.finishedAt.length && state.finishedAt[0] < now - RATE_WINDOW_MS) state.finishedAt.shift();
+	trimFinished(now);
 	return {
 		config,
 		need: state.need,

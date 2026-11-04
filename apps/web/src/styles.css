@@ -127,6 +127,19 @@ body {
 }
 
 /*
+ * iOS Safari 聚焦字号小于 16px 的输入框（日期、下拉框、数字…）时会把整页放大，之后不会自己缩回，
+ * 主屏幕的独立窗口里只能手动捏合。触屏设备上输入框一律至少 16px。
+ * 不放进 @layer：要压过组件上的 text-sm / text-xs（Tailwind 的 utilities 在 layer 里，不带 layer 的规则优先）。
+ */
+@media (pointer: coarse) {
+	input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]),
+	select,
+	textarea {
+		font-size: max(16px, 1em);
+	}
+}
+
+/*
  * 页面有自己的拖动条（timeline/Scrubber.tsx，时间线和文件夹 / 相册等列表）时：
  * 隐藏浏览器的滚动条（仍然可以滚动），整个内容区（包括页头的按钮）给拖动条让出右侧的位置。
  * 宽度和 Scrubber 的 w-10 / sm:w-14 一致。

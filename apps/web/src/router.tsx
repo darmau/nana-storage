@@ -258,6 +258,13 @@ function Tab({
 			to={to}
 			params={params as never}
 			activeOptions={{ exact: !!exact, includeSearch: false }}
+			// 和系统相册一样：已经在这个标签的首页时再点一次，回到顶部（时间线很长时不用一路滑回去）。
+			// 离得远就直接跳过去：平滑滚动会途经几万张照片，快速滚动的检测（library/scrub.ts）也会让中间的月份不加载。
+			onClick={(e) => {
+				if (!e.currentTarget.hasAttribute("data-status") || window.scrollY <= 0) return;
+				e.preventDefault();
+				window.scrollTo({ top: 0, behavior: window.scrollY > window.innerHeight * 3 ? "instant" : "smooth" });
+			}}
 			className="flex flex-1 flex-col items-center justify-center gap-1 text-fg/75">
 			{({ isActive }: { isActive: boolean }) => {
 				const on = isActive || forceActive;

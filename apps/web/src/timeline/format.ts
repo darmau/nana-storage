@@ -56,12 +56,22 @@ export function formatDateTime(ms: number): string {
 }
 
 /** 查看器标题用：按拍摄地时区拆成“日期”和“时间”两行。 */
-export function formatTakenParts(takenAt: number | null, tzOffsetMin: number | null): { date: string; time: string } {
-	if (!takenAt) return { date: t.date.unknown, time: "" };
+/**
+ * 查看器顶栏的拍摄时间。date / time 是宽屏的两行；手机顶栏右边有 5 个按钮，留给日期的只有约 90px，
+ * 完整日期会被截成“2026年1…”，所以另给一组紧凑的：short（月日 + 星期）和 sub（年份 + 时间）。
+ */
+export function formatTakenParts(
+	takenAt: number | null,
+	tzOffsetMin: number | null,
+): { date: string; time: string; short: string; sub: string } {
+	if (!takenAt) return { date: t.date.unknown, time: "", short: t.date.unknown, sub: "" };
 	const d = tzOffsetMin === null ? new Date(takenAt) : new Date(takenAt + tzOffsetMin * 60_000);
 	const timeZone = tzOffsetMin === null ? undefined : "UTC";
+	const time = d.toLocaleTimeString(locale, { timeZone, hour: "2-digit", minute: "2-digit" });
 	return {
 		date: d.toLocaleDateString(locale, { timeZone, year: "numeric", month: "long", day: "numeric", weekday: "short" }),
-		time: d.toLocaleTimeString(locale, { timeZone, hour: "2-digit", minute: "2-digit" }),
+		time,
+		short: d.toLocaleDateString(locale, { timeZone, month: "short", day: "numeric", weekday: "short" }),
+		sub: `${d.toLocaleDateString(locale, { timeZone, year: "numeric" })} ${d.toLocaleTimeString(locale, { timeZone, hour: "numeric", minute: "2-digit" })}`,
 	};
 }

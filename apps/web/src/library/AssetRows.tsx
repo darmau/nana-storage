@@ -231,7 +231,7 @@ const Row = memo(function Row({
 				aria-label={isSelected ? t.library.deselect : t.library.select}
 				onClick={(e) => (e.shiftKey ? extend(id) : toggle(id))}
 				className={`absolute left-0 top-2 flex h-10 w-10 items-center justify-center rounded-md transition ${
-					isSelected || active ? "opacity-100" : "opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+					isSelected || active ? "opacity-100" : "opacity-0 focus-visible:opacity-100 group-hover:opacity-100 pointer-events-none [@media(any-hover:hover)]:pointer-events-auto"
 				} ${isSelected ? "" : "bg-black/25"}`}
 			>
 				<span

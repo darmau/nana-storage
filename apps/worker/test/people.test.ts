@@ -205,6 +205,32 @@ describe("recognition", () => {
 		expect((await recognizePendingFaces(withIndex())).recognized).toBe(0);
 	});
 
+	it("the cron is not stuck behind a broken embedding or a face that keeps failing", async () => {
+		await seedAsset(1);
+		await seedAsset(2);
+		await seedAsset(3);
+		// 当时没有 Vectorize：三张脸都等 Cron 补写；第一张（最早的）向量是坏的
+		await saveFaces(env, aid(1), scan(face(randomVec())), 0);
+		await saveFaces(env, aid(2), scan(face(randomVec())), 0);
+		await saveFaces(env, aid(3), scan(face(randomVec())), 0);
+		const broken = (await facesOf(aid(1)))[0]!.id;
+		await env.DB.prepare("UPDATE faces SET embedding = ? WHERE id = ?").bind(new Uint8Array(100).buffer, broken).run();
+
+		const r = await recognizePendingFaces(withIndex(), Date.now());
+		expect(r.indexed).toBe(2);
+		expect((await facesOf(aid(1)))[0]).toMatchObject({ indexed: 0, state: FACE_STATE.ignored });
+		expect((await facesOf(aid(2)))[0]!.indexed).toBe(1);
+		// 坏掉的那张不再参与，下一次 Cron 不会再选到它
+		expect((await recognizePendingFaces(withIndex(), Date.now())).indexed).toBe(0);
+
+		// 识别时 Vectorize 出错：不抛出（其余的事照常做），连续出错就停下，不会一直空转
+		await seedAsset(4);
+		await saveFaces(env, aid(4), scan(face(randomVec())), 0);
+		await env.DB.prepare("UPDATE faces SET indexed = 1, state = ? WHERE asset_id = ?").bind(FACE_STATE.pending, aid(4)).run();
+		index.fail = true;
+		await expect(recognizePendingFaces(withIndex(), Date.now())).resolves.toMatchObject({ recognized: 0 });
+	});
+
 	it("the cron does nothing while the guard is tripped", async () => {
 		await seedAsset(1);
 		await saveFaces(env, aid(1), scan(face(randomVec())), 0);

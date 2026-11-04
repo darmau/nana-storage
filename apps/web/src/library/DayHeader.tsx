@@ -24,7 +24,7 @@ export function DayHeader({ day, top, items }: { day: string | null; top: number
 					)
 				}
 				className={`-ml-1 flex h-8 w-8 items-center justify-center rounded-full transition hover:bg-surface ${
-					all || active ? "opacity-100" : "opacity-0 focus-visible:opacity-100 group-hover/day:opacity-100"
+					all || active ? "opacity-100" : "opacity-0 focus-visible:opacity-100 group-hover/day:opacity-100 pointer-events-none [@media(any-hover:hover)]:pointer-events-auto"
 				}`}
 			>
 				<span

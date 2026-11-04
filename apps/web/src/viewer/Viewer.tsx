@@ -465,8 +465,14 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 							<div className="min-w-0 pl-1 leading-tight">
 								{taken && (
 									<>
-										<div className="truncate text-[15px] font-semibold">{taken.date}</div>
-										<div className="truncate text-xs text-muted">{taken.time}</div>
+										<div className="truncate text-[15px] font-semibold">
+											<span className="sm:hidden">{taken.short}</span>
+											<span className="hidden sm:inline">{taken.date}</span>
+										</div>
+										<div className="truncate text-xs text-muted">
+											<span className="sm:hidden">{taken.sub}</span>
+											<span className="hidden sm:inline">{taken.time}</span>
+										</div>
 									</>
 								)}
 							</div>
@@ -483,7 +489,8 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 							/>
 						)}
 					</div>
-					<div className="flex shrink-0 items-center gap-1">
+					{/* 手机上按钮之间不留空（每个仍是 44px 的触控区），省下的宽度给左边的日期 */}
+					<div className="flex shrink-0 items-center sm:gap-1">
 						{hd.plan && !edit.pending && (
 							<HdButton
 								plan={hd.plan}

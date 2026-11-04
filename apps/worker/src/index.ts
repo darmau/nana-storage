@@ -226,18 +226,17 @@ export default {
 		// 每小时：自动更新标记有变化的主题（每次最多 SMART_SET_CRON_BATCH 个）、识别推迟的人脸（每次最多 FACE_CRON_BATCH 张）、
 		// 设备端消失后补发它接管期间被 ack 掉的任务（每次最多 RESUME_BATCH 个），熔断时都跳过
 		if (controller.cron === "7 * * * *")
-			ctx.waitUntil(
-				Promise.allSettled([
-					refreshStaleSmartSets(env),
-					recognizePendingFaces(env),
-					requeueAfterDevice(env),
-				]).then((rs) => {
-					for (const r of rs) if (r.status === "rejected") console.error(JSON.stringify({ event: "cron_failed", error: String(r.reason).slice(0, 300) }));
-				}),
-			);
+			ctx.waitUntil(settleAll("hourly", [refreshStaleSmartSets(env), recognizePendingFaces(env), requeueAfterDevice(env)]));
 		else if (controller.cron === "17 3 * * *") {
-			// 每天：清理回收站、中断的上传
-			ctx.waitUntil(purgeTrash(env).then(() => cleanupStaleUploads(env)));
+			// 每天：清理回收站、中断的上传。两件事互不依赖：一件出错（比如 R2 暂时不可用）不能让另一件也跟着停掉。
+			ctx.waitUntil(settleAll("daily", [purgeTrash(env), cleanupStaleUploads(env)]));
 		}
 	},
 } satisfies ExportedHandler<Env, JobMessage>;
+
+/** Cron 的几件事各自独立：等全部结束，出错的只记日志（下一次 Cron 照常再来）。 */
+async function settleAll(cron: string, tasks: Promise<unknown>[]): Promise<void> {
+	for (const r of await Promise.allSettled(tasks)) {
+		if (r.status === "rejected") console.error(JSON.stringify({ event: "cron_failed", cron, error: String(r.reason).slice(0, 300) }));
+	}
+}

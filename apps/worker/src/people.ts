@@ -378,10 +378,18 @@ export async function recognizePendingFaces(env: Env, now = Date.now()): Promise
 	)
 		.bind(FACE_CRON_BATCH)
 		.all<{ id: string; embedding: ArrayBuffer }>();
-	let indexed = 0;
-	for (let i = 0; i < unindexed.length; i += 500) {
-		indexed += await indexFaces(env, unindexed.slice(i, i + 500).map((r) => ({ id: r.id, embedding: asInt8(r.embedding) })));
+	// 维数不对的向量（损坏的数据）永远写不进 Vectorize，还会让整批 upsert 失败；它们又总排在最前面，
+	// 不排除的话之后每小时都卡在同一批上，后面的脸永远补不进去。改成不参与识别（和太小的脸一样）。
+	const rows = unindexed.map((r) => ({ id: r.id, embedding: asInt8(r.embedding) }));
+	const broken = rows.filter((r) => r.embedding.length !== FACE_DIMS).map((r) => r.id);
+	for (let i = 0; i < broken.length; i += CHUNK) {
+		const chunk = broken.slice(i, i + CHUNK);
+		await env.DB.prepare(`UPDATE faces SET state = ${FACE_STATE.ignored} WHERE id IN (${marks(chunk.length)})`).bind(...chunk).run();
 	}
+	if (broken.length) console.warn(JSON.stringify({ event: "face_embedding_invalid", count: broken.length }));
+	const valid = rows.filter((r) => r.embedding.length === FACE_DIMS);
+	let indexed = 0;
+	for (let i = 0; i < valid.length; i += 500) indexed += await indexFaces(env, valid.slice(i, i + 500));
 
 	const { results } = await env.DB.prepare(
 		`SELECT id, state FROM faces
@@ -390,10 +398,19 @@ export async function recognizePendingFaces(env: Env, now = Date.now()): Promise
 	)
 		.bind(now - FACE_DEFER_MS, FACE_CRON_BATCH)
 		.all<{ id: string; state: number }>();
+	// 一张脸出错不影响后面的（否则它每小时都排在最前面，整个 Cron 一直卡在它上面）；
+	// 连续出错多半是 Vectorize / D1 暂时不可用，这次就停下，下一小时再来。
 	let recognized = 0;
+	let failures = 0;
 	for (const r of results) {
-		await recognizeFace(env, r.id, r.state === FACE_STATE.deferred);
-		recognized++;
+		try {
+			await recognizeFace(env, r.id, r.state === FACE_STATE.deferred);
+			recognized++;
+			failures = 0;
+		} catch (e) {
+			console.warn(JSON.stringify({ event: "face_recognize_failed", faceId: r.id, error: String(e).slice(0, 300) }));
+			if (++failures >= 3) break;
+		}
 	}
 	await env.DB.prepare(
 		"DELETE FROM people WHERE name IS NULL AND NOT EXISTS (SELECT 1 FROM faces f WHERE f.person_id = people.id)",
