@@ -325,3 +325,18 @@ export const COMPOSE_MAX_INPUT_BYTES = 1024 ** 3;
 export const COMPOSE_MIN_PIECE_PX = 16;
 /** compose 调用的硬超时：解码每张原图、拼接、编码一张一亿多像素的 JPEG。 */
 export const COMPOSE_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * 从 Instagram 导入（apps/worker/src/instagram.ts）：只支持公开帖子，图片存进根目录下的 INSTAGRAM_FOLDER。
+ * 只由用户点击触发，没有 Cron、没有自动重试。一个帖子 = 1 次 resolve（Worker 请求 1 次 instagram.com 的嵌入页）
+ * + 每张图 1 次 item（Worker 从 Instagram 的 CDN 下载 1 次，写 R2，建 1 个 process 任务，和上传一张照片相同）。
+ * Instagram 一个帖子最多 20 张，所以一次导入最多 21 个外部请求，都受 API_LIMITER 限制。
+ */
+export const INSTAGRAM_FOLDER = "Instagram";
+export const INSTAGRAM_MAX_ITEMS = 20;
+/** 单张图片的上限：Instagram 的原图最大 8192 像素，实测不到 10 MB。图片整个读进 Worker 内存（算 sha256），所以要有上限。 */
+export const INSTAGRAM_MAX_BYTES = 40 * 1024 ** 2;
+/** 嵌入页的大小上限（实测约 500 KB）。 */
+export const INSTAGRAM_MAX_PAGE_BYTES = 5 * 1024 ** 2;
+/** 每个外部请求的超时，不重试。 */
+export const INSTAGRAM_FETCH_TIMEOUT_MS = 30_000;

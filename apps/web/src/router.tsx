@@ -1,4 +1,5 @@
-import { Link, Outlet, createRootRoute, createRoute, createRouter, useRouterState } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { Link, Outlet, createRootRoute, createRoute, createRouter, useNavigate, useRouterState } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect } from "react";
 import { t } from "./i18n";
 import { ContextMenuHost, openMenuAt } from "./ui/ContextMenu";
@@ -24,6 +25,7 @@ import { SettingsLayout } from "./routes/settings/SettingsLayout";
 import { SettingsOverview } from "./routes/settings/SettingsOverview";
 import { DropUpload, useUploadTarget } from "./upload/DropUpload";
 import { UploadPanel } from "./upload/UploadPanel";
+import { openInstagramImport } from "./upload/instagram";
 import { UploadPicker, uploadMenuItems } from "./upload/picker";
 import { ProgressRing, UploadWatcher, useUploadProgress } from "./upload/UploadStatus";
 import {
@@ -34,6 +36,7 @@ import {
 	IconFolder,
 	IconHeart,
 	IconLibrary,
+	IconLink,
 	IconLogo,
 	IconMap,
 	IconOrganize,
@@ -66,8 +69,18 @@ function Layout() {
 	const inExplore = EXPLORE_PATHS.some((p) => under(pathname, p));
 	// “上传”弹出两项菜单，直接打开系统的选择器：在某个文件夹里传到这个文件夹，其他页面传到根目录
 	const uploadTarget = useUploadTarget();
+	const qc = useQueryClient();
+	const navigate = useNavigate();
+	// 外加“从 Instagram 导入”：只放在顶栏，图片固定存进 Instagram 文件夹，和当前所在的文件夹无关
 	const openUploadMenu = (e: React.MouseEvent<HTMLElement>) =>
-		openMenuAt(e.currentTarget, uploadMenuItems(uploadTarget, uploadTarget ? "folder" : "none"));
+		openMenuAt(e.currentTarget, [
+			...uploadMenuItems(uploadTarget, uploadTarget ? "folder" : "none"),
+			{
+				label: t.upload.menuInstagram,
+				icon: <IconLink size={18} />,
+				onSelect: () => openInstagramImport(qc, (folderId) => void navigate({ to: "/folders/$folderId", params: { folderId } })),
+			},
+		]);
 	// 上传在后台进行，切换页面不受影响；顶栏按钮显示进度
 	const uploadPct = useUploadProgress();
 	// 外壳已经画出来了：撤掉 index.html 的启动画面，之后由各页的骨架屏接手

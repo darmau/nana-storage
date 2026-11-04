@@ -91,6 +91,14 @@
 - 收尾（`finishGroup`）：同一次操作的新条目全部 ready 时，`compose_specs.finished_at` 抢到的那个任务把原照片移进回收站、把新条目加进原照片所在的相册（只做一次）。有一张失败时原照片不动。
 - 设备端不做 compose：claim 只认领 `DEVICE_KINDS`，设备接管时消费者照常用容器处理 compose 任务。
 
+## 从 Instagram 导入
+
+- 入口只在顶栏“上传”菜单（`router.tsx`，`upload/instagram.tsx` 的弹窗），图片固定存进根目录下的 `INSTAGRAM_FOLDER`（“Instagram”），和当前所在的文件夹无关。只支持公开帖子，视频跳过。
+- 服务端（`src/instagram.ts`）：`POST /api/imports/instagram/resolve { url, tzOffsetMin }` 读 `https://www.instagram.com/p/{code}/embed/captioned/`（不登录；帖子的常规页面和接口会重定向到登录页），从页面里的 `contextJSON` 取 `gql_data.shortcode_media`；嵌入页没有发布时间，用媒体 ID 换算（`postTime()`：`(id >> 23) + 1314220021721` 毫秒）。返回每张图的媒体 ID、CDN 地址、文件名（`账户名-YYYYMMDD-NN`，按浏览器时区）和是否导入过。`POST /item` 一次一张：下载、按文件头判断类型（只收图片）、sha256、写 R2，条目（pending，`client_mtime` = 发布时间，Instagram 去掉了 EXIF）+ 文件 + `instagram_imports` + process 任务同一个 batch，再 `enqueueJob`。
+- 去重按 Instagram 的媒体 ID（`instagram_imports`，迁移 0034，随条目级联删除）：CDN 每次给的字节不一定相同（会重新编码），sha256 对不上；sha256 去重照样做。
+- 安全：只请求 `www.instagram.com` 的嵌入页和 `*.cdninstagram.com` / `*.fbcdn.net`（`isCdnUrl()`，https、不带端口和用户名），`redirect: "manual"` 不跟随重定向，响应有大小上限（`INSTAGRAM_MAX_PAGE_BYTES` / `INSTAGRAM_MAX_BYTES`）、超时 `INSTAGRAM_FETCH_TIMEOUT_MS`。日志只记条目 id，不记账户名。
+- 成本：只由用户点击触发，没有 Cron、不重试；一个帖子最多 1 + `INSTAGRAM_MAX_ITEMS`（20）个外部请求，前端一次只发一个，受 `API_LIMITER` 限制。之后的处理和上传一样（每张 1 个 process 任务），熔断时 `item` 返回 503。
+
 ## 时间线与查看器
 
 - `GET /api/timeline/buckets` 返回每月张数；`GET /api/timeline/month/:ym` 返回一个月的紧凑数组（`src/timeline.ts`）。

@@ -116,6 +116,13 @@ export const IconUpload = icon(
 		<path d="M5 21h14" />
 	</>,
 );
+/** 链接（从 Instagram 导入：按链接导入，不用任何品牌图标） */
+export const IconLink = icon(
+	<>
+		<path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" />
+		<path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
+	</>,
+);
 export const IconDownload = icon(
 	<>
 		<path d="M12 3v12" />

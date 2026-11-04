@@ -21,6 +21,7 @@ import { refreshStaleSmartSets, similar } from "./similar";
 import { stats } from "./stats";
 import { timeline } from "./timeline";
 import { cleanupStaleUploads, uploads } from "./uploads";
+import { instagram } from "./instagram";
 
 export { Processor } from "./processor";
 export { UsageGuard } from "./guard";
@@ -64,6 +65,7 @@ api.get("/sync", async (c) => {
 });
 
 api.route("/uploads", uploads);
+api.route("/imports/instagram", instagram);
 api.route("/a", files);
 api.route("/timeline", timeline);
 api.route("/downloads", downloads);

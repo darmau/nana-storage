@@ -77,6 +77,11 @@ export const en: Messages = {
 			"has mask": "Photos with blurred areas can't be stitched or split. Remove the blur first",
 			"too large": "The result would be too large",
 			"piece too small": "One of the pieces is too small",
+			"bad instagram url": "That's not a link to an Instagram post",
+			"instagram unavailable": "Couldn't reach Instagram, or Instagram refused the request. Try again later.",
+			"instagram post not public": "Couldn't read this post. It may not be public, or it was deleted.",
+			"instagram no images": "This post has no images",
+			"file too large": "The file is too large",
 		},
 		partFailed: "Upload incomplete. Please upload again.",
 		badRequest: "Invalid request",
@@ -97,6 +102,25 @@ export const en: Messages = {
 		menuDirToFolder: "Upload folder to this folder…",
 		menuFilesHere: "Upload files here…",
 		menuDirHere: "Upload folder here…",
+		menuInstagram: "Import from Instagram…",
+		igTitle: "Import from Instagram",
+		igHint: (folder: string) =>
+			`Paste a link to a public post. The original images are saved to the "${folder}" folder, named account-date-number. Videos aren't imported.`,
+		igPlaceholder: "https://www.instagram.com/p/…",
+		igStart: "Import",
+		igResolving: "Reading the post…",
+		igProgress: (done: number, total: number) => `Importing ${fmtNumber(done)} of ${fmtNumber(total)}`,
+		igDone: (imported: number, duplicates: number, failed: number) =>
+			[
+				`Imported ${fmtNumber(imported)} ${imported === 1 ? "image" : "images"}`,
+				duplicates ? `skipped ${fmtNumber(duplicates)} ${duplicates === 1 ? "duplicate" : "duplicates"}` : "",
+				failed ? `${fmtNumber(failed)} failed (import again to fill them in)` : "",
+			]
+				.filter(Boolean)
+				.join(", ") + ". They appear in the folder once processed.",
+		igVideosSkipped: (n: number) => `${fmtNumber(n)} ${n === 1 ? "video" : "videos"} in the post weren't imported.`,
+		igOpenFolder: "Open folder",
+		igStopping: "Closing stops the remaining images",
 		cannotUpload: "Can't upload",
 		folderUnavailable: "The destination folder doesn't exist or failed to load. Refresh and try again.",
 		tooManyFiles: "Too many files",

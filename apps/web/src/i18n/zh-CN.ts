@@ -74,6 +74,11 @@ export const zhCN = {
 			"has mask": "打码过的照片不能拼接或切割，请先去掉打码",
 			"too large": "结果太大了",
 			"piece too small": "有一张切得太小了",
+			"bad instagram url": "不是 Instagram 帖子的链接",
+			"instagram unavailable": "连不上 Instagram，或者 Instagram 拒绝了请求，请稍后再试",
+			"instagram post not public": "读不到这个帖子：可能不是公开的，或者已经删除",
+			"instagram no images": "这个帖子里没有图片",
+			"file too large": "文件太大了",
 		},
 		partFailed: "上传的数据不完整，请重新上传",
 		badRequest: "请求无效",
@@ -94,6 +99,21 @@ export const zhCN = {
 		menuDirToFolder: "上传文件夹到这个文件夹…",
 		menuFilesHere: "上传文件到这里…",
 		menuDirHere: "上传文件夹到这里…",
+		menuInstagram: "从 Instagram 导入…",
+		/** 从 Instagram 导入（upload/instagram.tsx） */
+		igTitle: "从 Instagram 导入",
+		igHint: (folder: string) => `粘贴一个公开帖子的链接，图片原图会存进“${folder}”文件夹，文件名是“账户名-日期-编号”。视频不导入。`,
+		igPlaceholder: "https://www.instagram.com/p/…",
+		igStart: "导入",
+		igResolving: "正在读取帖子…",
+		igProgress: (done: number, total: number) => `正在导入 ${fmtNumber(done)} / ${fmtNumber(total)}`,
+		igDone: (imported: number, duplicates: number, failed: number) =>
+			[`已导入 ${fmtNumber(imported)} 张`, duplicates ? `跳过重复 ${fmtNumber(duplicates)} 张` : "", failed ? `失败 ${fmtNumber(failed)} 张（再导入一次可以补上）` : ""]
+				.filter(Boolean)
+				.join("，") + "。处理完后出现在文件夹里。",
+		igVideosSkipped: (n: number) => `帖子里的 ${fmtNumber(n)} 个视频没有导入。`,
+		igOpenFolder: "打开文件夹",
+		igStopping: "关闭后剩下的不再导入",
 		cannotUpload: "无法上传",
 		folderUnavailable: "目标文件夹不存在或没加载出来，刷新后再试。",
 		tooManyFiles: "文件太多",

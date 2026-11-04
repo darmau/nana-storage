@@ -85,7 +85,7 @@ export const UPLOAD_ABANDONED_MS = 3600_000;
  * 上传中断的条目（比如 Live Photo 的图片传完了、视频没传完）单独列出：它们不算重复，
  * 否则重新上传同一组文件时会被当成重复跳过，中断的条目永远补不上。
  */
-async function existingAsset(env: Env, hashes: string[]): Promise<{ found: Map<string, string>; abandoned: Set<string> }> {
+export async function existingAsset(env: Env, hashes: string[]): Promise<{ found: Map<string, string>; abandoned: Set<string> }> {
 	const found = new Map<string, string>();
 	const abandoned = new Set<string>();
 	for (let i = 0; i < hashes.length; i += 90) {
