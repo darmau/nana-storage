@@ -15,6 +15,8 @@ export interface Page {
 	scores?: number[];
 	/** 整理 › 细节不足：和 items 一一对应的预览 WebP 字节数（排序依据） */
 	previews?: number[];
+	/** 整理 › 细节不足：和 items 一一对应的文件夹路径（从根下第一层到所在文件夹，根目录是空串） */
+	paths?: string[];
 }
 /** 列表视图每行的信息：[原始文件名, 原件总字节数, 拍摄时间（UTC 毫秒）, 时区偏移, 上传时间]，与 worker 的 ItemDetail 一致 */
 export type ItemDetail = [string | null, number, number | null, number | null, number];

@@ -37,6 +37,7 @@ export function AssetRows({
 	items,
 	details,
 	previews,
+	paths,
 	months,
 	hasMore,
 	loadingMore,
@@ -48,6 +49,8 @@ export function AssetRows({
 	details: (ItemDetail | undefined)[];
 	/** 整理 › 细节不足：和 items 一一对应的预览 WebP 字节数，显示在尺寸列下面 */
 	previews?: number[];
+	/** 整理 › 细节不足：和 items 一一对应的文件夹路径（根目录是空串），显示在名称下面 */
+	paths?: string[];
 	months?: Bucket[];
 	hasMore: boolean;
 	loadingMore: boolean;
@@ -133,7 +136,15 @@ export function AssetRows({
 			<div id="asset-grid" ref={ref} className={`relative ${scrubbing ? "scrub-placeholder-rows" : ""}`} style={{ height }}>
 				{!scrubbing &&
 					items.slice(i0, i1).map((it, k) => (
-						<Row key={it[0]} item={it} detail={details[i0 + k]} preview={previews?.[i0 + k]} top={(i0 + k) * ROW_H} onOpen={onOpen} />
+						<Row
+							key={it[0]}
+							item={it}
+							detail={details[i0 + k]}
+							preview={previews?.[i0 + k]}
+							path={paths?.[i0 + k]}
+							top={(i0 + k) * ROW_H}
+							onOpen={onOpen}
+						/>
 					))}
 			</div>
 			{showScrubber && index && <ListScrubber gridRef={ref} months={index} starts={starts} totalSize={height} dated={dated} />}
@@ -145,12 +156,14 @@ const Row = memo(function Row({
 	item,
 	detail,
 	preview,
+	path,
 	top,
 	onOpen,
 }: {
 	item: TimelineItem;
 	detail: ItemDetail | undefined;
 	preview?: number;
+	path?: string;
 	top: number;
 	onOpen: (id: string) => void;
 }) {
@@ -162,6 +175,8 @@ const Row = memo(function Row({
 	const [failed, setFailed] = useState(false);
 	const taken = formatTakenShort(takenAt, tz);
 	const bytes = size ? formatBytes(size) : "";
+	// path 只在“细节不足”列表里有：undefined 是不显示（其它列表），空串是根目录
+	const folder = path === undefined ? null : path || t.pickers.root;
 
 	// 触屏长按进入多选，和格子一样
 	const press = useRef<{ timer: ReturnType<typeof setTimeout>; fired: boolean } | null>(null);
@@ -224,7 +239,10 @@ const Row = memo(function Row({
 						)}
 						{favorite === 1 && <IconHeart size={14} filled className="shrink-0 text-danger" />}
 					</span>
-					<span className="block truncate text-xs text-muted sm:hidden">{bytes ? `${taken} · ${bytes}` : taken}</span>
+					{folder != null && <span className="hidden truncate text-xs text-muted sm:block">{folder}</span>}
+					<span className="block truncate text-xs text-muted sm:hidden">
+						{[folder, bytes ? `${taken} · ${bytes}` : taken].filter(Boolean).join(" · ")}
+					</span>
 				</span>
 				<span className={`${CELL} hidden lg:block`}>{w > 1 && h > 1 ? `${w} × ${h}` : "–"}</span>
 				<span className={`${CELL} hidden md:block`}>{formatOf(name) || "–"}</span>
