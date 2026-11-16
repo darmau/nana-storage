@@ -3,7 +3,7 @@
  * 照片描述写进 D1 后，同步 upload 到 AI Search 实例；查询时按语义召回照片 id，
  * 再由调用方用 D1 过滤可见（deleted_at IS NULL、status='ready'），结果和 FTS 搜索一样按拍摄时间返回。
  *
- * 实例绑定 DESC_SEARCH（wrangler.jsonc 的 ai_search，instance_name = nana-descriptions，需在 Cloudflare 先创建）。
+ * 实例绑定 DESC_SEARCH（wrangler.jsonc 的 ai_search_namespaces，namespace = nana，实例 nana-descriptions，需在 Cloudflare 先创建）。
  * 本地开发没有这个绑定：descSearch 返回 undefined，写入/搜索都直接跳过（和 FACE_INDEX 同样的做法）。
  *
  * 成本：写入 $0.75/百万 token（一次性），查询 $0.75/千次（每月前 1000 次免费），存储 $2/GB·月。
@@ -30,9 +30,17 @@ interface DescChunk {
 	item?: { key?: string };
 }
 
+/** 命名空间绑定（ai_search_namespaces）：DESC_SEARCH 是命名空间句柄，get(实例名) 拿到实例。 */
+interface DescSearchNamespace {
+	get(name: string): DescSearchInstance | undefined;
+}
+
+/** 实例名（在 nana 命名空间下）。 */
+const DESC_INSTANCE = "nana-descriptions";
+
 /** 绑定缺失（本地开发、测试）时返回 undefined。 */
 export function descSearch(env: Env): DescSearchInstance | undefined {
-	return (env as unknown as { DESC_SEARCH?: DescSearchInstance }).DESC_SEARCH;
+	return (env as unknown as { DESC_SEARCH?: DescSearchNamespace }).DESC_SEARCH?.get(DESC_INSTANCE);
 }
 
 /** 照片 id ↔ AI Search 条目 key。照片 id 是 ULID（26 个 [0-9A-Z]），直接拼 .md 即可。 */

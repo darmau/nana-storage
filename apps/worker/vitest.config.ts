@@ -13,7 +13,7 @@ import { defineConfig } from "vitest/config";
 function testWranglerConfig(): string {
 	const { rawConfig } = experimental_readRawConfig({ config: path.join(import.meta.dirname, "wrangler.jsonc") });
 	// Vectorize 没有本地模拟，测试里用内存假实现（test/fake-index.ts）。AI Search 同样没有本地模拟、实例也不一定存在，一并去掉。
-	const { vectorize: _vectorize, ai_search: _aiSearch, ...rest } = rawConfig;
+	const { vectorize: _vectorize, ai_search_namespaces: _aiSearch, ...rest } = rawConfig;
 	const config = { ...rest, queues: { ...rawConfig.queues, consumers: [] } };
 	const out = path.join(import.meta.dirname, "wrangler.test.generated.json");
 	writeFileSync(out, JSON.stringify(config, null, "\t"));
