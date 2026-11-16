@@ -991,7 +991,7 @@ const DESC_SYNC_BATCH = 5000;
 library.post("/search/semantic/sync", async (c) => {
 	if (!descSearch(c.env)) return c.json({ error: "ai search not configured" }, 404);
 	const { results } = await c.env.DB.prepare(
-		`SELECT id, description FROM assets WHERE description IS NOT NULL AND description != '' AND ${VISIBLE} ORDER BY id LIMIT ?`,
+		`SELECT a.id, a.description FROM assets a WHERE a.description IS NOT NULL AND a.description != '' AND ${VISIBLE} ORDER BY a.id LIMIT ?`,
 	)
 		.bind(DESC_SYNC_BATCH)
 		.all<{ id: string; description: string }>();

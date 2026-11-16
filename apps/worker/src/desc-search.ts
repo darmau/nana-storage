@@ -38,9 +38,13 @@ interface DescSearchNamespace {
 /** 实例名（在 nana 命名空间下）。 */
 const DESC_INSTANCE = "nana-descriptions";
 
-/** 绑定缺失（本地开发、测试）时返回 undefined。 */
+/** 绑定缺失（本地开发、测试）或实例不存在时返回 undefined。 */
 export function descSearch(env: Env): DescSearchInstance | undefined {
-	return (env as unknown as { DESC_SEARCH?: DescSearchNamespace }).DESC_SEARCH?.get(DESC_INSTANCE);
+	try {
+		return (env as unknown as { DESC_SEARCH?: DescSearchNamespace }).DESC_SEARCH?.get(DESC_INSTANCE);
+	} catch {
+		return undefined;
+	}
 }
 
 /** 照片 id ↔ AI Search 条目 key。照片 id 是 ULID（26 个 [0-9A-Z]），直接拼 .md 即可。 */
