@@ -13,7 +13,7 @@ import { LibraryHome } from "./routes/LibraryHome";
 import { exploreSearch, SearchBox, SearchPage } from "./routes/SearchPage";
 import { AlbumPage, AlbumsPage, ArchivePage, FavoritesPage, FoldersPage, TrashPage } from "./routes/LibraryPages";
 import { PeoplePage, PersonPage } from "./routes/PeoplePages";
-import { CompressPage, OrganizePage } from "./routes/OrganizePages";
+import { CompressPage, OrganizePage, QualityPage } from "./routes/OrganizePages";
 import { DuplicatesPage } from "./routes/DuplicatesPage";
 import { SmartSetPage, SmartSetsPage, validateSmartSetSearch } from "./routes/SmartSetPages";
 import { TimelinePage, validateTimelineSearch } from "./routes/TimelinePage";
@@ -52,7 +52,7 @@ import {
  * 资料库下的页面：移动端底部的“资料库”标签在这些页面上都算选中（相册、文件夹有自己的标签）。
  * 整理（重复照片、相似照片、原图压缩）在移动端没有自己的标签，入口平铺在资料库首页，所以也算在这里。
  */
-const LIBRARY_PATHS = ["/library", "/favorites", "/archive", "/trash", "/organize", "/duplicates", "/compress"];
+const LIBRARY_PATHS = ["/library", "/favorites", "/archive", "/trash", "/organize", "/duplicates", "/compress", "/quality"];
 /** 探索下的页面：移动端底部的“探索”标签在这些页面上也算选中（地图在移动端从探索页进入） */
 const EXPLORE_PATHS = ["/search", "/people", "/smart-sets", "/map"];
 const under = (pathname: string, p: string) => pathname === p || pathname.startsWith(`${p}/`);
@@ -150,8 +150,8 @@ function Layout() {
 				<SideLink to="/archive" icon={<IconArchive />}>
 					{t.archive.title}
 				</SideLink>
-				{/* 整理：重复照片、相似照片、原图压缩都在这一页里，进入其中一个时这一项也算选中 */}
-				<SideLink to="/organize" icon={<IconOrganize />} forceActive={["/organize", "/duplicates", "/compress"].some((p) => under(pathname, p))}>
+				{/* 整理：重复照片、原图压缩、细节不足都在这一页里，进入其中一个时这一项也算选中 */}
+				<SideLink to="/organize" icon={<IconOrganize />} forceActive={["/organize", "/duplicates", "/compress", "/quality"].some((p) => under(pathname, p))}>
 					{t.organize.title}
 				</SideLink>
 				{/* 小标题本身就是探索页的入口（搜索结果也在那里） */}
@@ -316,6 +316,7 @@ const routeTree = rootRoute.addChildren([
 	createRoute({ getParentRoute: () => rootRoute, path: "/duplicates", component: DuplicatesPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/organize", component: OrganizePage }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/compress", component: CompressPage, validateSearch: viewerSearch }),
+	createRoute({ getParentRoute: () => rootRoute, path: "/quality", component: QualityPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/archive", component: ArchivePage, validateSearch: listSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/trash", component: TrashPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/search", component: SearchPage, validateSearch: exploreSearch }),

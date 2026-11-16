@@ -13,6 +13,8 @@ export interface Page {
 	marks?: [1 | -1, number | null][];
 	/** 主题的建议、相似照片：和 items 一一对应的分数 */
 	scores?: number[];
+	/** 整理 › 细节不足：和 items 一一对应的预览 WebP 字节数（排序依据） */
+	previews?: number[];
 }
 /** 列表视图每行的信息：[原始文件名, 原件总字节数, 拍摄时间（UTC 毫秒）, 时区偏移, 上传时间]，与 worker 的 ItemDetail 一致 */
 export type ItemDetail = [string | null, number, number | null, number | null, number];

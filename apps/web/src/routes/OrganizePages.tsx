@@ -6,7 +6,7 @@ import { api, errorText } from "../api";
 import { fmtNumber, t } from "../i18n";
 import { LibraryList } from "../library/LibraryList";
 import { formatBytes } from "../timeline/format";
-import { IconAlert, IconChevronRight, IconCompress, IconDuplicate, IconInfo } from "../ui/icons";
+import { IconAlert, IconChevronRight, IconCompress, IconDuplicate, IconInfo, IconQuality } from "../ui/icons";
 import { useDocumentTitle } from "../ui/title";
 
 /**
@@ -17,6 +17,7 @@ import { useDocumentTitle } from "../ui/title";
 export const ORGANIZE_ITEMS = [
 	{ to: "/duplicates", icon: IconDuplicate, title: () => t.duplicates.title, sub: () => t.organize.duplicatesSub },
 	{ to: "/compress", icon: IconCompress, title: () => t.compress.title, sub: () => t.organize.compressSub },
+	{ to: "/quality", icon: IconQuality, title: () => t.quality.title, sub: () => t.organize.qualitySub },
 ] as const;
 
 /** 一个入口：图标 + 标题 + 一句说明，整行可点。 */
@@ -60,6 +61,32 @@ export function OrganizeTitle({ title, className = "" }: { title: string; classN
 			</Link>
 			<IconChevronRight size={20} className="shrink-0 text-muted" />
 			<h1 className="truncate">{title}</h1>
+		</div>
+	);
+}
+
+// ------------------------------------------------------------------ 细节不足
+
+/**
+ * 细节不足：按预览 WebP 的体积从小到大列出照片 / Live Photo（预览长边统一 3840，所以越小≈细节越少，
+ * 通常是被放大、虚焦或过曝的照片）。列表视图每行显示分辨率、原件大小和预览大小；选中后走资料库的常规操作（删除进回收站）。
+ */
+export function QualityPage() {
+	useDocumentTitle(t.quality.title);
+	return (
+		<div className="space-y-5">
+			<OrganizeTitle title={t.quality.title} className="flex-1" />
+			<p className="flex items-start gap-2.5 rounded-2xl bg-notice px-4 py-3 text-sm">
+				<IconQuality size={18} className="mt-0.5 shrink-0 text-muted" />
+				<span>{t.quality.intro}</span>
+			</p>
+			<LibraryList
+				source={{ key: ["quality"], path: "/quality" }}
+				context={{ kind: "library" }}
+				groupByDay={false}
+				view="list"
+				empty={t.quality.none}
+			/>
 		</div>
 	);
 }

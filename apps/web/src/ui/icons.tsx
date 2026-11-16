@@ -366,6 +366,14 @@ export const IconCompress = icon(
 	</>,
 );
 
+/** 细节不足：外圈实线、内圈虚线的虚焦圆 */
+export const IconQuality = icon(
+	<>
+		<circle cx="12" cy="12" r="8" />
+		<circle cx="12" cy="12" r="3.5" strokeDasharray="2.5 2" />
+	</>,
+);
+
 /** 拼接：上下两块接在一起 */
 export const IconStitch = icon(
 	<>

@@ -240,6 +240,18 @@ for (const stats of [false, true]) describe(`list query plans ${stats ? "with sk
 		}
 	});
 
+	// 细节不足：顺着 asset_files_preview_small 按体积从小到大读，不排序、不扫 assets
+	it("low-detail list reads asset_files_preview_small in order", async () => {
+		const stmts = (await capture("/quality")).filter((s) => /INDEXED BY asset_files_preview_small\b/.test(s.sql));
+		expect(stmts.length).toBe(1);
+		for (const stmt of stmts) {
+			const p = await plan(stmt.sql, stmt.binds);
+			expect(p, p).toMatch(/USING INDEX asset_files_preview_small/);
+			expect(p, p).toMatch(/SEARCH a USING INDEX sqlite_autoindex_assets_1/);
+			expect(p, p).not.toMatch(/TEMP B-TREE/);
+		}
+	});
+
 	// FTS5 的非全文列没有索引：按条目 id 过滤 FTS 表本身会扫描整个索引（线上每处理一张照片读 24 万行），只能按 rowid 定位
 	it("full-text index writes locate rows by rowid", async () => {
 		const stmts = await captureDirect(() => [

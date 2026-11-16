@@ -36,6 +36,7 @@ const formatOf = (name: string | null) => name?.match(/\.([0-9a-z]{1,5})$/i)?.[1
 export function AssetRows({
 	items,
 	details,
+	previews,
 	months,
 	hasMore,
 	loadingMore,
@@ -45,6 +46,8 @@ export function AssetRows({
 }: {
 	items: TimelineItem[];
 	details: (ItemDetail | undefined)[];
+	/** 整理 › 细节不足：和 items 一一对应的预览 WebP 字节数，显示在尺寸列下面 */
+	previews?: number[];
 	months?: Bucket[];
 	hasMore: boolean;
 	loadingMore: boolean;
@@ -129,7 +132,9 @@ export function AssetRows({
 			</div>
 			<div id="asset-grid" ref={ref} className={`relative ${scrubbing ? "scrub-placeholder-rows" : ""}`} style={{ height }}>
 				{!scrubbing &&
-					items.slice(i0, i1).map((it, k) => <Row key={it[0]} item={it} detail={details[i0 + k]} top={(i0 + k) * ROW_H} onOpen={onOpen} />)}
+					items.slice(i0, i1).map((it, k) => (
+						<Row key={it[0]} item={it} detail={details[i0 + k]} preview={previews?.[i0 + k]} top={(i0 + k) * ROW_H} onOpen={onOpen} />
+					))}
 			</div>
 			{showScrubber && index && <ListScrubber gridRef={ref} months={index} starts={starts} totalSize={height} dated={dated} />}
 		</>
@@ -139,11 +144,13 @@ export function AssetRows({
 const Row = memo(function Row({
 	item,
 	detail,
+	preview,
 	top,
 	onOpen,
 }: {
 	item: TimelineItem;
 	detail: ItemDetail | undefined;
+	preview?: number;
 	top: number;
 	onOpen: (id: string) => void;
 }) {
@@ -223,7 +230,12 @@ const Row = memo(function Row({
 				<span className={`${CELL} hidden md:block`}>{formatOf(name) || "–"}</span>
 				<span className={`${CELL} hidden sm:block`}>{taken}</span>
 				<span className={`${CELL} hidden xl:block`}>{formatDateTime(uploadedAt)}</span>
-				<span className={`${CELL} hidden pr-3 text-right sm:block`}>{bytes || "–"}</span>
+				<span className="hidden pr-3 text-right sm:block">
+					<span className="block text-sm tabular-nums text-muted">{bytes || "–"}</span>
+					{preview != null && (
+						<span className="block text-xs tabular-nums text-muted/70">{t.quality.previewSize(formatBytes(preview))}</span>
+					)}
+				</span>
 			</button>
 			{/* 勾选框盖在缩略图上，悬停或多选时出现 */}
 			<button

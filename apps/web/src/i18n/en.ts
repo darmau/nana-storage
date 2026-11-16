@@ -661,9 +661,10 @@ export const en: Messages = {
 	},
 	organize: {
 		title: "Clean up",
-		intro: "Remove duplicates and shrink oversized originals to free up space.",
+		intro: "Remove duplicates and low-detail photos, and shrink oversized originals to free up space.",
 		duplicatesSub: "Find near-identical photos and keep one",
 		compressSub: "Shrink very large JPEG originals with no visible loss",
+		qualitySub: "Find photos with lots of pixels but little detail",
 	},
 	compress: {
 		title: "Compress originals",
@@ -711,6 +712,13 @@ export const en: Messages = {
 		onDevice: "Your device is processing, so there's no container cost.",
 		queuedDone: (queued: number, skipped: number) =>
 			`Queued ${fmtNumber(queued)}${skipped ? `, skipped ${fmtNumber(skipped)} (already compressed, not compressible or busy)` : ""}`,
+	},
+	quality: {
+		title: "Low detail",
+		intro:
+			"Sorted by preview size (WebP, 3840px long edge) from smallest up: at the same size, a smaller preview means less real detail — usually upscaled, out-of-focus or overexposed photos. Select to move them to Trash, recoverable within 30 days.",
+		previewSize: (bytes: string) => `${bytes} preview`,
+		none: "No obviously low-detail photos.",
 	},
 	compose: {
 		stitch: "Stitch",

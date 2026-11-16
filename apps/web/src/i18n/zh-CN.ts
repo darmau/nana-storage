@@ -659,9 +659,10 @@ export const zhCN = {
 	},
 	organize: {
 		title: "整理",
-		intro: "删掉重复的照片、压缩过大的原图，腾出空间。",
+		intro: "删掉重复、细节不足的照片，压缩过大的原图，腾出空间。",
 		duplicatesSub: "找出内容几乎一样的照片，留一张",
 		compressSub: "压小过大的 JPEG 原图，看不出差别",
+		qualitySub: "找出像素很多但细节很少的照片",
 	},
 	compress: {
 		title: "原图压缩",
@@ -708,6 +709,13 @@ export const zhCN = {
 		onDevice: "由设备端处理，没有容器费用。",
 		queuedDone: (queued: number, skipped: number) =>
 			`已加入队列 ${fmtNumber(queued)} 张${skipped ? `，${fmtNumber(skipped)} 张跳过（已压缩、不能压缩或正在处理）` : ""}`,
+	},
+	quality: {
+		title: "细节不足",
+		intro:
+			"按预览图（WebP，长边 3840）的体积从小到大排列：同一个尺寸下，预览越小说明实际细节越少，通常是放大过的、虚焦或过曝的照片。选中后移到回收站，30 天内可以恢复。",
+		previewSize: (bytes: string) => `预览 ${bytes}`,
+		none: "没有发现细节明显不足的照片。",
 	},
 	compose: {
 		stitch: "拼接",

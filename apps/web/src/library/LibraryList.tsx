@@ -38,6 +38,10 @@ export function LibraryList({
 		() => (view === "list" ? (query.data?.pages.flatMap((p) => p.details ?? p.items.map(() => undefined)) ?? []) : []),
 		[query.data, view],
 	);
+	const previews = useMemo(
+		() => (view === "list" ? (query.data?.pages.flatMap((p) => p.previews ?? []) ?? []) : []),
+		[query.data, view],
+	);
 	// 主题的样本列表：每个格子标出正例 / 反例 / 矛盾
 	const marks = useMemo(() => {
 		const pages = query.data?.pages;
@@ -92,6 +96,7 @@ export function LibraryList({
 					<AssetRows
 						items={items}
 						details={details}
+						previews={previews}
 						months={query.data?.pages[0]?.months}
 						scrubber={context.kind === "trash" ? false : datedScrubber ? "dated" : "plain"}
 						hasMore={!!query.hasNextPage}
