@@ -272,6 +272,7 @@ def main():
     ap.add_argument("--cloudflared", default="cloudflared", help="cloudflared 可执行文件路径（默认从 PATH 找）")
     ap.add_argument("--clear-captions", action="store_true", help="清空本机进度库里 AI 写过的描述（只清 status=captioned 的），以便换提示词后重做")
     ap.add_argument("--clear-has-description", action="store_true", help="清空进度库里 status='has_description' 的照片描述（用户确认过的那批）")
+    ap.add_argument("--sync", action="store_true", help="一次性把 D1 里现有描述同步进 AI Search 语义索引（只 upload 已有文本，不生成）")
     args = ap.parse_args()
 
     site = args.site or None
@@ -281,7 +282,7 @@ def main():
     dev = site.startswith("http://")
 
     # 确认模型已拉取
-    if not args.no_pull and not args.dry_run and not args.clear_captions and not args.clear_has_description:
+    if not args.no_pull and not args.dry_run and not args.clear_captions and not args.clear_has_description and not args.sync:
         have = {m.get("name") or m.get("model") for m in ollama.list().get("models", [])}
         if args.model not in have:
             print(f"拉取模型 {args.model} ...", file=sys.stderr)
@@ -299,6 +300,17 @@ def main():
     nana = Nana(site, cloudflared=cf)
     if dev:
         nana.get_token = lambda: ""  # 本地开发不需要令牌
+
+    if args.sync:
+        try:
+            res = nana.request("POST", "/api/search/semantic/sync")
+            print(f"已同步 {res.get('indexed', 0)} 条现有描述到语义索引。", file=sys.stderr)
+        except ApiError as e:
+            print(f"同步失败：{e}", file=sys.stderr)
+            nana.close()
+            sys.exit(2)
+        nana.close()
+        return
 
     db = sqlite3.connect(args.db)
     db.execute("CREATE TABLE IF NOT EXISTS done (asset_id TEXT PRIMARY KEY, status TEXT NOT NULL, caption TEXT, ts INTEGER NOT NULL)")
