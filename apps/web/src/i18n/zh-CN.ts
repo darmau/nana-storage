@@ -794,6 +794,8 @@ export const zhCN = {
 		favoritesOnly: "只看收藏",
 		clearFilters: "清除筛选",
 		none: "没有找到。",
+		fuzzy: "语义搜索",
+		fuzzyHint: "按含义匹配描述，而不是精确匹配文字",
 	},
 	explore: {
 		all: "全部",

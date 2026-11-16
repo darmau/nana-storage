@@ -19,6 +19,7 @@ import { createJob } from "./jobs";
 import { applyMaskToFaces } from "./people";
 import { deleteAssetsPermanently } from "./purge";
 import { searchSource, updateSearchDescription } from "./search";
+import { descSearch, searchDescriptions, syncDesc } from "./desc-search";
 import { ITEM_COLUMNS, type TimelineItem, toItem } from "./timeline";
 import { UPLOAD_ABANDONED_MS } from "./uploads";
 import { ulid } from "./ulid";
@@ -826,6 +827,10 @@ library.patch("/assets/:id", async (c) => {
 		stmts.push(updateSearchDescription(env, id, description ?? ""));
 	}
 	await env.DB.batch(stmts);
+	// 描述变化后同步进 AI Search（写/改 → upload，清空 → delete）。失败只记日志，不影响写描述。
+	if (description !== undefined) {
+		await syncDesc(env, id, description);
+	}
 	// 打码盖住的脸马上移出人物（不等新图生成）
 	if (maskChanged) await applyMaskToFaces(env, id);
 
@@ -959,4 +964,41 @@ library.get("/search/cameras", async (c) => {
 		`SELECT camera, COUNT(*) AS count FROM assets a WHERE camera IS NOT NULL AND ${VISIBLE} GROUP BY camera ORDER BY count DESC LIMIT 100`,
 	).all();
 	return c.json(results);
+});
+
+/**
+ * GET /api/search/semantic?q=：描述语义搜索（Cloudflare AI Search）。按语义召回最多 50 张（AI Search 单次上限），
+ * 再用 D1 过滤可见、按拍摄时间返回（和普通搜索同一套 item 结构）。没有绑定 / 没召回时返回空。
+ */
+library.get("/search/semantic", async (c) => {
+	const q = (c.req.query("q") ?? "").trim();
+	if (!q) return c.json({ items: [], next: null });
+	const ids = await searchDescriptions(c.env, q, 50);
+	if (!ids.length) return c.json({ items: [], next: null });
+	const marks = ids.map(() => "?").join(",");
+	return c.json(
+		await page(
+			c.env,
+			`SELECT ${ITEM_COLUMNS} FROM assets a WHERE a.id IN (${marks}) AND ${VISIBLE} ORDER BY a.taken_at DESC, a.id DESC`,
+			ids,
+			offsetOf(c.req.query("offset")),
+		),
+	);
+});
+
+/** 一次性把 D1 里现有描述搬运进 AI Search（只 upload 已有文本，不生成）。只由用户点击触发，每次最多 DESC_SYNC_BATCH 条。 */
+const DESC_SYNC_BATCH = 5000;
+library.post("/search/semantic/sync", async (c) => {
+	if (!descSearch(c.env)) return c.json({ error: "ai search not configured" }, 404);
+	const { results } = await c.env.DB.prepare(
+		`SELECT id, description FROM assets WHERE description IS NOT NULL AND description != '' AND ${VISIBLE} ORDER BY id LIMIT ?`,
+	)
+		.bind(DESC_SYNC_BATCH)
+		.all<{ id: string; description: string }>();
+	let indexed = 0;
+	for (const r of results) {
+		await syncDesc(c.env, r.id, r.description);
+		indexed++;
+	}
+	return c.json({ indexed });
 });

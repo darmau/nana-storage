@@ -799,6 +799,8 @@ export const en: Messages = {
 		favoritesOnly: "Favorites only",
 		clearFilters: "Clear filters",
 		none: "Nothing found.",
+		fuzzy: "Semantic",
+		fuzzyHint: "Match descriptions by meaning instead of exact text",
 	},
 	explore: {
 		all: "All",

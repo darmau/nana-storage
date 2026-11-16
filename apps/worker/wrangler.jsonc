@@ -61,6 +61,14 @@
 			"index_name": "nana-faces"
 		}
 	],
+	// 描述语义搜索（Cloudflare AI Search，src/desc-search.ts）：实例在 default 命名空间，名字 nana-descriptions，需在 Cloudflare 先创建。
+	// 只通过 Workers binding 走服务端，不启 public endpoint，所有结果仍经过 authenticate()。
+	"ai_search": [
+		{
+			"binding": "DESC_SEARCH",
+			"instance_name": "nana-descriptions"
+		}
+	],
 	// KV 的名字是 nana-kv（render-wrangler.mjs 按它查 ID）。
 	"kv_namespaces": [
 		{

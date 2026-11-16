@@ -99,6 +99,7 @@ export function SearchPage() {
 	const [kind, setKind] = useState("");
 	const [camera, setCamera] = useState("");
 	const [favorite, setFavorite] = useState(false);
+	const [fuzzy, setFuzzy] = useState(false);
 	const cameras = useQuery({
 		queryKey: ["search", "cameras"],
 		queryFn: () => api<{ camera: string; count: number }[]>("/search/cameras"),
@@ -123,6 +124,13 @@ export function SearchPage() {
 		return p.toString();
 	}, [debouncedQ, from, to, kind, camera, favorite]);
 
+	// 语义搜索：按含义匹配描述（AI Search），只吃搜索词，不带日期/类型/相机/收藏筛选。
+	const fuzzyActive = fuzzy && !!debouncedQ;
+	const source = fuzzyActive
+		? { key: ["search", "semantic", debouncedQ], path: `/search/semantic?q=${encodeURIComponent(debouncedQ)}` }
+		: { key: ["search", qs], path: `/search?${qs}` };
+	const showResults = fuzzyActive || !!qs;
+
 	const active = !!(from || to || kind || camera || favorite);
 	return (
 		<div className="space-y-6">
@@ -130,8 +138,19 @@ export function SearchPage() {
 				{/* 桌面的搜索框在顶栏；手机顶栏没有，放在这里 */}
 				<SearchBox className="h-12 md:hidden" />
 				<div className="flex flex-wrap items-center gap-2 text-sm">
-					<label className={`${field} flex items-center gap-1.5 focus-within:border-fg/40`}>
-						<span className="text-muted">{t.search.from}</span>
+					<button
+						type="button"
+						className={`${field} ${fuzzy ? "!border-transparent !bg-fg !text-bg" : ""}`}
+						onClick={() => setFuzzy(!fuzzy)}
+						title={t.search.fuzzyHint}
+					>
+						{t.search.fuzzy}
+					</button>
+				</div>
+				{!fuzzy && (
+					<div className="flex flex-wrap items-center gap-2 text-sm">
+						<label className={`${field} flex items-center gap-1.5 focus-within:border-fg/40`}>
+							<span className="text-muted">{t.search.from}</span>
 						<input type="date" className="bg-transparent text-fg outline-none" value={from} onChange={(e) => setFrom(e.target.value)} />
 					</label>
 					<label className={`${field} flex items-center gap-1.5 focus-within:border-fg/40`}>
@@ -180,9 +199,10 @@ export function SearchPage() {
 						</button>
 					)}
 				</div>
+				)}
 			</div>
-			{qs ? (
-				<LibraryList key={qs} source={{ key: ["search", qs], path: `/search?${qs}` }} context={{ kind: "library" }} empty={t.search.none} />
+			{showResults ? (
+				<LibraryList key={fuzzyActive ? `semantic:${debouncedQ}` : qs} source={source} context={{ kind: "library" }} empty={t.search.none} />
 			) : (
 				<ExploreHome onType={(type) => setKind(kindValue(type))} />
 			)}
