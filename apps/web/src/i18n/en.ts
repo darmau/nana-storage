@@ -169,9 +169,9 @@ export const en: Messages = {
 		/** Toast after a window drop upload finishes (UploadDoneToast) */
 		doneTitle: "Uploaded",
 		doneCount: (n: number) => count(n, "item", "items"),
-		doneAddToAlbum: "Add to album",
-		doneAdded: "Added to album",
-		doneAddFailed: (error: string) => `Couldn't add to album: ${error}`,
+		doneMoveToFolder: "Move to folder",
+		doneMoved: "Moved",
+		doneMoveFailed: (error: string) => `Couldn't move to folder: ${error}`,
 	},
 	library: {
 		open: "Open",

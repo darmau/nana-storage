@@ -160,9 +160,9 @@ export const zhCN = {
 		/** 拖到窗口上传完成后右下角的提示（UploadDoneToast） */
 		doneTitle: "上传成功",
 		doneCount: (n: number) => `${fmtNumber(n)} 项`,
-		doneAddToAlbum: "添加到相册",
-		doneAdded: "已添加到相册",
-		doneAddFailed: (error: string) => `添加到相册失败：${error}`,
+		doneMoveToFolder: "移动到文件夹",
+		doneMoved: "已移动",
+		doneMoveFailed: (error: string) => `移动到文件夹失败：${error}`,
 	},
 	library: {
 		open: "打开",

@@ -2,16 +2,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { errorText } from "../api";
 import { t } from "../i18n";
-import { addToAlbum } from "../library/actions";
-import { AlbumPicker } from "../library/Pickers";
-import { IconAlbum, IconCheck, IconClose } from "../ui/icons";
+import { batch } from "../library/actions";
+import { FolderPicker } from "../library/Pickers";
+import { IconCheck, IconClose, IconFolder } from "../ui/icons";
 import { useUploads } from "./UploadStatus";
 import { uploader } from "./uploader";
 
 /**
- * 拖到窗口（首页 → 根目录）上传完成后，右下角提示“上传成功”，下面给一个“添加到相册”按钮。
- * 点开复用相册选择器（library/Pickers.tsx 的 AlbumPicker），把刚才上传的照片加进指定相册，
- * 和 Google Photos 的做法一样。显示它的时候 UploadPanel 让位（见 UploadPanel 里对 dropDone 的判断）。
+ * 拖到窗口（首页 → 根目录）上传完成后，右下角提示“上传成功”，下面给一个“移动到文件夹”按钮。
+ * 点开复用文件夹选择器（library/Pickers.tsx 的 FolderPicker），把刚才上传的照片移进指定文件夹。
+ * 显示它的时候 UploadPanel 让位（见 UploadPanel 里对 dropDone 的判断）。
  */
 export function UploadDoneToast() {
 	const snap = useUploads();
@@ -28,17 +28,17 @@ export function UploadDoneToast() {
 
 	if (picking && done) {
 		return (
-			<AlbumPicker
+			<FolderPicker
 				onClose={() => setPicking(false)}
-				onPick={(albumId) => {
+				onPick={(folderId) => {
 					setPicking(false);
 					const ids = done.assetIds;
-					void addToAlbum(qc, albumId, ids)
+					void batch(qc, ids, { action: "move", folderId })
 						.then(() => {
-							setMessage(t.upload.doneAdded);
+							setMessage(t.upload.doneMoved);
 							uploader.dismissDropDone();
 						})
-						.catch((e) => setMessage(t.upload.doneAddFailed(errorText(e))));
+						.catch((e) => setMessage(t.upload.doneMoveFailed(errorText(e))));
 				}}
 			/>
 		);
@@ -64,8 +64,8 @@ export function UploadDoneToast() {
 						</button>
 					</div>
 					<button className="btn-primary mt-3 w-full" onClick={() => setPicking(true)}>
-						<IconAlbum size={18} />
-						{t.upload.doneAddToAlbum}
+						<IconFolder size={18} />
+						{t.upload.doneMoveToFolder}
 					</button>
 				</section>
 			)}

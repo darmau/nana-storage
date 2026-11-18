@@ -35,11 +35,11 @@ export interface Item {
 	folder: string;
 	/** 同一次 add() 的所有条目共用一个 batchId。 */
 	batchId: number;
-	/** 拖到窗口（首页 → 根目录）上传，完成后右下角提示“添加到相册”。 */
+	/** 拖到窗口（首页 → 根目录）上传，完成后右下角提示“移动到文件夹”。 */
 	source?: "drop";
 }
 
-/** 刚完成的一批“拖到根目录”的上传，右下角提示“上传成功 / 添加到相册”；处理掉（关闭或已加入）后是 null。 */
+/** 刚完成的一批“拖到根目录”的上传，右下角提示“上传成功 / 移动到文件夹”；处理掉（关闭或已移动）后是 null。 */
 export interface DropDone {
 	batchId: number;
 	assetIds: string[];
@@ -171,7 +171,7 @@ export class Uploader {
 	/**
 	 * 加入一批文件。folderId 是目标文件夹（为空表示不放进文件夹，或按所选文件夹的目录结构建）；
 	 * folderLabel 是它的显示路径。paths 和 files 一一对应（拖进来的文件夹），给了就按它保留目录结构。
-	 * source 是"drop"表示从窗口拖入（只有它会在完成后提示“添加到相册”）。
+	 * source 是"drop"表示从窗口拖入（只有它会在完成后提示“移动到文件夹”）。
 	 */
 	add(files: File[], opts: { folderId: string | null; folderLabel: string; keepStructure: boolean; paths?: string[]; source?: "drop" }) {
 		const { groups, skipped } = groupFiles(
@@ -223,7 +223,7 @@ export class Uploader {
 	}
 
 	/**
-	 * 找出最新的一批“拖到根目录、已经全部结束、至少有一张真的上传成功”的条目，准备提示“添加到相册”。
+	 * 找出最新的一批“拖到根目录、已经全部结束、至少有一张真的上传成功”的条目，准备提示“移动到文件夹”。
 	 * 只有 source 是 drop 且没有放进文件夹（首页等页面拖入 → 根目录）才算；跳过已经处理过的批次。
 	 */
 	private updateDropDone() {
@@ -247,7 +247,7 @@ export class Uploader {
 		this.dropDone = null;
 	}
 
-	/** 处理掉右下角的“添加到相册”提示（点关闭，或已经加进相册）。 */
+	/** 处理掉右下角的“移动到文件夹”提示（点关闭，或已经移进文件夹）。 */
 	dismissDropDone() {
 		if (!this.dropDone) return;
 		this.shownDropBatches.add(this.dropDone.batchId);

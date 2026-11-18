@@ -10,7 +10,7 @@ import { t } from "../i18n";
 /**
  * 把文件加进上传队列，传到 folderId（null 是根目录，不放进文件夹）。先取目标文件夹的路径用来显示；
  * 文件夹不存在或加载失败就提示，不上传。paths 和 files 一一对应（拖进来的文件夹），给了就按它保留目录结构。
- * source 是"drop"表示从窗口拖入，会在上传完成后提示“添加到相册”。
+ * source 是"drop"表示从窗口拖入，会在上传完成后提示“移动到文件夹”。
  */
 export async function uploadTo(
 	qc: QueryClient,
