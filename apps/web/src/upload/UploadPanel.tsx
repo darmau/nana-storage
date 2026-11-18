@@ -43,6 +43,8 @@ export function UploadPanel() {
 	}, [snap]);
 
 	if (!count) return null;
+	// 右下角让位给“上传成功 / 添加到相册”的提示（UploadDoneToast）
+	if (snap.dropDone) return null;
 
 	const { counts } = snap;
 	const finished = counts.done + counts.duplicate;

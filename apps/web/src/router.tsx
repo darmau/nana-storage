@@ -25,6 +25,7 @@ import { SettingsLayout } from "./routes/settings/SettingsLayout";
 import { SettingsOverview } from "./routes/settings/SettingsOverview";
 import { DropUpload, useUploadTarget } from "./upload/DropUpload";
 import { UploadPanel } from "./upload/UploadPanel";
+import { UploadDoneToast } from "./upload/UploadDoneToast";
 import { openInstagramImport } from "./upload/instagram";
 import { UploadPicker, uploadMenuItems } from "./upload/picker";
 import { ProgressRing, UploadWatcher, useUploadProgress } from "./upload/UploadStatus";
@@ -121,6 +122,7 @@ function Layout() {
 			<GuardBanner />
 			<UploadWatcher />
 			<UploadPanel />
+			<UploadDoneToast />
 			<DropUpload />
 			<UploadPicker />
 			<ContextMenuHost />

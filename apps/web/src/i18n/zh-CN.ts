@@ -157,6 +157,12 @@ export const zhCN = {
 		cancelled: "已取消",
 		stalled: "读取文件没有响应，上传已暂停。文件在 NAS 或网络盘上的话，确认连上后点“继续”。",
 		guardTripped: "成本防护已触发，上传已暂停，详情见设置。",
+		/** 拖到窗口上传完成后右下角的提示（UploadDoneToast） */
+		doneTitle: "上传成功",
+		doneCount: (n: number) => `${fmtNumber(n)} 项`,
+		doneAddToAlbum: "添加到相册",
+		doneAdded: "已添加到相册",
+		doneAddFailed: (error: string) => `添加到相册失败：${error}`,
 	},
 	library: {
 		open: "打开",

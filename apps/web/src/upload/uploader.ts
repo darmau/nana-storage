@@ -33,6 +33,16 @@ export interface Item {
 	folderId: string | null;
 	/** 显示用的目标文件夹路径（目标文件夹 + 保留的目录结构），为空表示不放进文件夹。 */
 	folder: string;
+	/** 同一次 add() 的所有条目共用一个 batchId。 */
+	batchId: number;
+	/** 拖到窗口（首页 → 根目录）上传，完成后右下角提示“添加到相册”。 */
+	source?: "drop";
+}
+
+/** 刚完成的一批“拖到根目录”的上传，右下角提示“上传成功 / 添加到相册”；处理掉（关闭或已加入）后是 null。 */
+export interface DropDone {
+	batchId: number;
+	assetIds: string[];
 }
 
 export interface Snapshot {
@@ -43,6 +53,7 @@ export interface Snapshot {
 	counts: Record<ItemStatus, number>;
 	totalBytes: number;
 	sentBytes: number;
+	dropDone: DropDone | null;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -110,6 +121,9 @@ export class Uploader {
 	private snapshot: Snapshot = this.buildSnapshot();
 	private notifyScheduled = false;
 	private nextId = 0;
+	private nextBatchId = 0;
+	private dropDone: DropDone | null = null;
+	private shownDropBatches = new Set<number>();
 
 	subscribe = (fn: () => void) => {
 		this.listeners.add(fn);
@@ -125,6 +139,7 @@ export class Uploader {
 			() =>
 				requestAnimationFrame(() => {
 					this.notifyScheduled = false;
+					this.updateDropDone();
 					this.snapshot = this.buildSnapshot();
 					for (const fn of this.listeners) fn();
 				}),
@@ -149,14 +164,16 @@ export class Uploader {
 			counts,
 			totalBytes,
 			sentBytes,
+			dropDone: this.dropDone,
 		};
 	}
 
 	/**
 	 * 加入一批文件。folderId 是目标文件夹（为空表示不放进文件夹，或按所选文件夹的目录结构建）；
 	 * folderLabel 是它的显示路径。paths 和 files 一一对应（拖进来的文件夹），给了就按它保留目录结构。
+	 * source 是"drop"表示从窗口拖入（只有它会在完成后提示“添加到相册”）。
 	 */
-	add(files: File[], opts: { folderId: string | null; folderLabel: string; keepStructure: boolean; paths?: string[] }) {
+	add(files: File[], opts: { folderId: string | null; folderLabel: string; keepStructure: boolean; paths?: string[]; source?: "drop" }) {
 		const { groups, skipped } = groupFiles(
 			files.map((f, i) =>
 				Object.assign(f, {
@@ -165,6 +182,7 @@ export class Uploader {
 			) as UploadFile[],
 		);
 		this.skipped.push(...skipped);
+		const batchId = this.nextBatchId++;
 		const newItems: Item[] = groups.map((g) => ({
 			id: this.nextId++,
 			group: g,
@@ -174,6 +192,8 @@ export class Uploader {
 			status: "queued",
 			folderId: opts.folderId,
 			folder: [opts.folderLabel, g.folderPath].filter(Boolean).join(" / "),
+			batchId,
+			source: opts.source,
 		}));
 		this.items.push(...newItems);
 		this.queue.push(...newItems);
@@ -199,6 +219,39 @@ export class Uploader {
 		this.items = [];
 		this.skipped = [];
 		this.stoppedReason = null;
+		this.notify();
+	}
+
+	/**
+	 * 找出最新的一批“拖到根目录、已经全部结束、至少有一张真的上传成功”的条目，准备提示“添加到相册”。
+	 * 只有 source 是 drop 且没有放进文件夹（首页等页面拖入 → 根目录）才算；跳过已经处理过的批次。
+	 */
+	private updateDropDone() {
+		const byBatch = new Map<number, { assetIds: string[]; terminal: boolean; drop: boolean; root: boolean }>();
+		for (const it of this.items) {
+			let b = byBatch.get(it.batchId);
+			if (!b) {
+				b = { assetIds: [], terminal: true, drop: it.source === "drop", root: it.folderId === null };
+				byBatch.set(it.batchId, b);
+			}
+			if (it.status === "done" && it.assetId) b.assetIds.push(it.assetId);
+			if (it.status === "queued" || it.status === "hashing" || it.status === "uploading") b.terminal = false;
+		}
+		for (const [batchId, b] of [...byBatch].sort((a, b) => b[0] - a[0])) {
+			if (this.shownDropBatches.has(batchId)) continue;
+			if (b.drop && b.root && b.terminal && b.assetIds.length) {
+				this.dropDone = { batchId, assetIds: b.assetIds };
+				return;
+			}
+		}
+		this.dropDone = null;
+	}
+
+	/** 处理掉右下角的“添加到相册”提示（点关闭，或已经加进相册）。 */
+	dismissDropDone() {
+		if (!this.dropDone) return;
+		this.shownDropBatches.add(this.dropDone.batchId);
+		this.dropDone = null;
 		this.notify();
 	}
 

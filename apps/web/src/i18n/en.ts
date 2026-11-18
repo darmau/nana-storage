@@ -166,6 +166,12 @@ export const en: Messages = {
 		stalled:
 			"Reading files stopped responding, so uploads are paused. If the files are on a NAS or network drive, reconnect it, then click Resume.",
 		guardTripped: "Cost protection tripped, so uploads are paused. See Settings.",
+		/** Toast after a window drop upload finishes (UploadDoneToast) */
+		doneTitle: "Uploaded",
+		doneCount: (n: number) => count(n, "item", "items"),
+		doneAddToAlbum: "Add to album",
+		doneAdded: "Added to album",
+		doneAddFailed: (error: string) => `Couldn't add to album: ${error}`,
 	},
 	library: {
 		open: "Open",

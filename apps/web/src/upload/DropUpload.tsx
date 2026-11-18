@@ -69,7 +69,7 @@ export function DropUpload() {
 					qc,
 					folderId,
 					dropped.map((d) => d.file),
-					{ keepStructure: true, paths: dropped.map((d) => d.path) },
+					{ keepStructure: true, paths: dropped.map((d) => d.path), source: "drop" },
 				);
 			});
 		};
