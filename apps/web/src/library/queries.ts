@@ -1,4 +1,4 @@
-import { SMART_SET_CONFLICT, type SmartSetLevel, type SmartSetMetrics, type StorageSummary } from "@nana/shared";
+import { SMART_SET_CONFLICT, type FolderStatsResponse, type SmartSetLevel, type SmartSetMetrics, type StorageSummary } from "@nana/shared";
 import { api } from "../api";
 import type { Bucket, TimelineItem } from "../timeline/types";
 
@@ -148,4 +148,10 @@ export const storageSummaryQuery = {
 	queryKey: ["storage-summary"],
 	queryFn: () => api<StorageSummary>("/stats/summary"),
 	staleTime: 5 * 60_000,
+};
+
+/** 统计页：每个文件夹自己（不含子文件夹）的照片 / 视频数和原图体积。 */
+export const folderStatsQuery = {
+	queryKey: ["stats", "folders"],
+	queryFn: () => api<FolderStatsResponse>("/stats/folders"),
 };

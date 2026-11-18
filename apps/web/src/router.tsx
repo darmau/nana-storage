@@ -12,6 +12,7 @@ import { BurstPage } from "./routes/BurstPage";
 import { LibraryHome } from "./routes/LibraryHome";
 import { exploreSearch, SearchBox, SearchPage } from "./routes/SearchPage";
 import { AlbumPage, AlbumsPage, ArchivePage, FavoritesPage, FoldersPage, TrashPage } from "./routes/LibraryPages";
+import { StatsPage } from "./routes/StatsPage";
 import { PeoplePage, PersonPage } from "./routes/PeoplePages";
 import { CompressPage, OrganizePage, QualityPage } from "./routes/OrganizePages";
 import { DuplicatesPage } from "./routes/DuplicatesPage";
@@ -32,6 +33,7 @@ import { ProgressRing, UploadWatcher, useUploadProgress } from "./upload/UploadS
 import {
 	IconAlbum,
 	IconArchive,
+	IconChart,
 	IconChevronRight,
 	IconCompass,
 	IconFolder,
@@ -55,7 +57,7 @@ import {
  */
 const LIBRARY_PATHS = ["/library", "/favorites", "/archive", "/trash", "/organize", "/duplicates", "/compress", "/quality"];
 /** 探索下的页面：移动端底部的“探索”标签在这些页面上也算选中（地图在移动端从探索页进入） */
-const EXPLORE_PATHS = ["/search", "/people", "/smart-sets", "/map"];
+const EXPLORE_PATHS = ["/search", "/people", "/smart-sets", "/map", "/stats"];
 const under = (pathname: string, p: string) => pathname === p || pathname.startsWith(`${p}/`);
 
 /**
@@ -175,6 +177,9 @@ function Layout() {
 				<SideLink to="/map" icon={<IconMap />}>
 					{t.nav.map}
 				</SideLink>
+				<SideLink to="/stats" icon={<IconChart />}>
+					{t.nav.stats}
+				</SideLink>
 				<div className="mx-4 my-3 border-t border-border" />
 				<SideLink to="/trash" icon={<IconTrash />}>
 					{t.trash.title}
@@ -221,7 +226,7 @@ function SideLink({
 	forceActive,
 	children,
 }: {
-	to: "/" | "/map" | "/people" | "/smart-sets" | "/albums" | "/favorites" | "/archive" | "/organize" | "/trash";
+	to: "/" | "/map" | "/stats" | "/people" | "/smart-sets" | "/albums" | "/favorites" | "/archive" | "/organize" | "/trash";
 	icon: React.ReactNode;
 	exact?: boolean;
 	forceActive?: boolean;
@@ -309,6 +314,7 @@ const routeTree = rootRoute.addChildren([
 	createRoute({ getParentRoute: () => rootRoute, path: "/albums", component: AlbumsPage }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/albums/$albumId", component: AlbumPage, validateSearch: listSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/map", component: LazyMap, validateSearch: viewerSearch }),
+	createRoute({ getParentRoute: () => rootRoute, path: "/stats", component: StatsPage }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/bursts/$assetId", component: BurstPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/favorites", component: FavoritesPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/people", component: PeoplePage }),

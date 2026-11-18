@@ -17,7 +17,7 @@ export type BatchAction =
 
 /** 资料库里任何数据变了以后，刷新所有相关列表。 */
 export function invalidateLibrary(qc: QueryClient) {
-	for (const key of ["timeline", "list", "asset", "folders", "albums", "smart-sets", "duplicates", "compress", "people", "storage-summary"])
+	for (const key of ["timeline", "list", "asset", "folders", "albums", "smart-sets", "duplicates", "compress", "people", "storage-summary", "stats"])
 		void qc.invalidateQueries({ queryKey: [key] });
 }
 

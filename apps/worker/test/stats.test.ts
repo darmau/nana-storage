@@ -83,3 +83,57 @@ describe("storage summary", () => {
 	});
 });
 
+describe("folder stats", () => {
+	const fid = (n: number) => `SF${String(n).padStart(24, "0")}`;
+	const aid = (n: number) => `SA${String(n).padStart(24, "0")}`;
+
+	async function insertAsset(n: number, opts: { kind?: string; status?: string; folder?: string | null; archived?: number; deleted?: number | null; size?: number }) {
+		await env.DB.prepare(
+			`INSERT INTO assets (id, kind, status, folder_id, archived, deleted_at, file_size, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)`,
+		)
+			.bind(aid(n), opts.kind ?? "photo", opts.status ?? "ready", opts.folder ?? null, opts.archived ?? 0, opts.deleted ?? null, opts.size ?? 0)
+			.run();
+	}
+
+	beforeEach(async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM album_assets"),
+			env.DB.prepare("DELETE FROM albums"),
+			env.DB.prepare("DELETE FROM asset_files"),
+			env.DB.prepare("DELETE FROM assets"),
+		]);
+		for (let i = 0; i < 50; i++) {
+			const res = await env.DB.prepare("DELETE FROM folders WHERE id NOT IN (SELECT parent_id FROM folders WHERE parent_id IS NOT NULL)").run();
+			if (!res.meta.changes) break;
+		}
+	});
+
+	it("counts each folder's own photos / videos / size, plus unfiled", async () => {
+		await env.DB.batch([
+			env.DB.prepare("INSERT INTO folders (id, parent_id, name, created_at) VALUES (?, NULL, 'A', 0)").bind(fid(1)),
+			env.DB.prepare("INSERT INTO folders (id, parent_id, name, created_at) VALUES (?, ?, '2024', 0)").bind(fid(2), fid(1)),
+			env.DB.prepare("INSERT INTO folders (id, parent_id, name, created_at) VALUES (?, NULL, 'B', 0)").bind(fid(3)),
+		]);
+		await insertAsset(1, { folder: fid(1), size: 1000 });
+		await insertAsset(2, { folder: fid(1), size: 2000 });
+		await insertAsset(3, { kind: "video", folder: fid(1), size: 5000 });
+		await insertAsset(4, { folder: fid(2), size: 300 });
+		await insertAsset(5, { folder: null, size: 1500 });
+		await insertAsset(6, { kind: "video", folder: fid(3), size: 7000 });
+		await insertAsset(7, { folder: fid(1), size: 999, archived: 1 });
+		await insertAsset(8, { folder: fid(1), size: 1, status: "processing" });
+		await insertAsset(9, { folder: fid(1), size: 2, deleted: 1 });
+
+		const res = await SELF.fetch("http://example.com/api/stats/folders", { headers: await authHeaders() });
+		expect(res.status).toBe(200);
+		const body = await res.json() as { folders: { id: string; photos: number; videos: number; size: number }[]; unfiled: { photos: number; videos: number; size: number } };
+		const byId = new Map(body.folders.map((f) => [f.id, f]));
+
+		expect(byId.get(fid(1))).toMatchObject({ photos: 2, videos: 1, size: 8000 });
+		expect(byId.get(fid(2))).toMatchObject({ photos: 1, videos: 0, size: 300 });
+		expect(byId.get(fid(3))).toMatchObject({ photos: 0, videos: 1, size: 7000 });
+		expect(body.unfiled).toEqual({ photos: 1, videos: 0, size: 1500 });
+	});
+});
+

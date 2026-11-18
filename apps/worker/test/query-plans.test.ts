@@ -183,6 +183,16 @@ for (const stats of [false, true]) describe(`list query plans ${stats ? "with sk
 		}
 	});
 
+	it("folder stats read assets_folder_visible", async () => {
+		const stmts = (await capture("/stats/folders")).filter((s) => s.sql.includes("INDEXED BY assets_folder_visible"));
+		expect(stmts.length).toBe(2);
+		for (const stmt of stmts) {
+			const p = await plan(stmt.sql, stmt.binds);
+			expect(p, p).toMatch(/assets_folder_visible/);
+			expect(p, p).not.toMatch(/assets_timeline/);
+		}
+	});
+
 	// 其他接口里读 assets 的查询：不能顺着 assets_timeline（deleted_at = NULL）扫完整个资料库
 	const others: [string, RegExp][] = [
 		["/timeline/month/2024-05", /FROM assets INDEXED BY assets_month/],

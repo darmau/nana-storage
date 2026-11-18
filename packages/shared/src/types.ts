@@ -74,6 +74,26 @@ export interface StorageSummary {
 	videos: number;
 }
 
+/** GET /api/stats/folders：一个文件夹自己（不含子文件夹）的照片 / 视频数和原图体积。 */
+export interface FolderStats {
+	id: string;
+	parent_id: string | null;
+	name: string;
+	/** 照片（含 Live Photo）数 */
+	photos: number;
+	/** 视频数 */
+	videos: number;
+	/** 原图总字节数（original + raw + live_video） */
+	size: number;
+}
+
+/** GET /api/stats/folders 的响应。 */
+export interface FolderStatsResponse {
+	folders: FolderStats[];
+	/** 根目录里没放进文件夹的照片 */
+	unfiled: { photos: number; videos: number; size: number };
+}
+
 /** 主题的灵敏度档位（SMART_SET_SENSITIVITY 的键）。 */
 export type SmartSetLevel = "strict" | "normal" | "loose";
 
