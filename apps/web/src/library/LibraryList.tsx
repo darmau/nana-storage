@@ -132,6 +132,7 @@ export function LibraryList({
 						onClose={close}
 						context={context.kind === "trash" ? "trash" : "library"}
 						personId={context.kind === "person" ? context.personId : undefined}
+						slideshowSource={source}
 					/>
 				)}
 			</AssetActionsProvider>

@@ -61,7 +61,7 @@ interface Slide {
 	rev: number;
 }
 
-export function Slideshow({ source, onClose }: { source: ListSource; onClose: () => void }) {
+export function Slideshow({ source, startId, onClose }: { source: ListSource; startId?: string; onClose: () => void }) {
 	const query = useInfiniteQuery(listQuery(source));
 	const photos = useMemo<TimelineItem[]>(
 		() => query.data?.pages.flatMap((p) => p.items).filter((it) => it[3] !== KIND_VIDEO) ?? [],
@@ -151,13 +151,14 @@ export function Slideshow({ source, onClose }: { source: ListSource; onClose: ()
 		if (it) void show(it, false);
 	}, [photos, settings.shuffle, index, show]);
 
-	// 第一张
+	// 第一张：指定了起始照片就从它开始（查看器里“从这张开始放映”），否则按原来的方式
+	const startItem = startId ? photos.find((it) => it[0] === startId) : undefined;
 	useEffect(() => {
 		if (!current && seq.current === 0 && photos.length) {
-			const first = settings.shuffle ? pick(null) : photos[0]!;
+			const first = settings.shuffle ? (startItem ?? pick(null)) : (startItem ?? photos[0]!);
 			if (first) void show(first);
 		}
-	}, [current, photos, settings.shuffle, pick, show]);
+	}, [current, photos, settings.shuffle, pick, show, startItem]);
 
 	// 自动播放：这一张显示出来之后开始计时
 	useEffect(() => {

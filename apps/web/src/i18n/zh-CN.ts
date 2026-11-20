@@ -333,6 +333,7 @@ export const zhCN = {
 		processingVeil: "正在处理",
 		editLoadFailed: "图片加载失败，请稍后再试",
 		editFailed: (error: string) => `保存失败：${error}`,
+		slideshow: "从这张开始放映幻灯片",
 	},
 	slideshow: {
 		dialog: "幻灯片",

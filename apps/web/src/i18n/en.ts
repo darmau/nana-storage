@@ -340,6 +340,7 @@ export const en: Messages = {
 		processingVeil: "Processing",
 		editLoadFailed: "Couldn't load the image. Try again later.",
 		editFailed: (error: string) => `Couldn't save: ${error}`,
+		slideshow: "Slideshow from here",
 	},
 	slideshow: {
 		dialog: "Slideshow",

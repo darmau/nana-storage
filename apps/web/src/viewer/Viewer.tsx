@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { flushSync } from "react-dom";
 import { api, errorText } from "../api";
 import { batch, invalidateLibrary } from "../library/actions";
+import type { ListSource } from "../library/queries";
 import { markProcessing, unmarkProcessing, useProcessing } from "../library/processing";
 import { t } from "../i18n";
 import { formatTakenParts } from "../timeline/format";
@@ -20,6 +21,7 @@ import {
 	IconMinus,
 	IconPlus,
 	IconRestore,
+	IconSlideshow,
 	IconTrash,
 } from "../ui/icons";
 import { confirmDialog } from "../ui/confirm";
@@ -28,6 +30,7 @@ import { useThemeColor } from "../ui/themeColor";
 import { assetFacesQuery } from "../people/model";
 import { EditPreview, type EditPreviewSpec, Editor, type EditResult, ProcessingVeil } from "./Editor";
 import { InfoPanel } from "./InfoPanel";
+import { Slideshow } from "./Slideshow";
 import {
 	assetCrop,
 	cropFaceBox,
@@ -69,6 +72,8 @@ interface Props {
 	context?: "library" | "trash";
 	/** 从人物页打开时：照片上圈出这个人物的脸 */
 	personId?: string;
+	/** 有列表数据源时（文件夹 / 相册等）在顶栏显示“从这张开始放映幻灯片” */
+	slideshowSource?: ListSource;
 }
 
 const CLOSE_MS = 170;
@@ -108,11 +113,13 @@ function preloadImage(url: string) {
 }
 const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-export function Viewer({ id, nav, onNavigate, onClose, context = "library", personId }: Props) {
+export function Viewer({ id, nav, onNavigate, onClose, context = "library", personId, slideshowSource }: Props) {
 	const qc = useQueryClient();
 	const item = nav.item;
 	const detail = useQuery({ queryKey: ["asset", id], queryFn: () => api<AssetDetail>(`/assets/${id}`) });
 	const [showInfo, setShowInfo] = useState(false);
+	// 从这张开始放映幻灯片
+	const [slideshow, setSlideshow] = useState(false);
 	// 沉浸模式：隐藏所有按钮和信息面板，切换照片时保持
 	const [immersive, setImmersive] = useState(false);
 	const chrome = `transition-opacity duration-200 ${immersive ? "pointer-events-none opacity-0" : ""}`;
@@ -521,6 +528,11 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 								)}
 							</>
 						)}
+						{slideshowSource && kind !== KIND_VIDEO && (
+							<IconButton label={t.viewer.slideshow} onClick={() => setSlideshow(true)}>
+								<IconSlideshow />
+							</IconButton>
+						)}
 						<IconButton label={t.viewer.info} onClick={() => setShowInfo((v) => !v)} pressed={showInfo}>
 							<IconInfo />
 						</IconButton>
@@ -579,6 +591,7 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 				)}
 				{detail.error && <p className="absolute bottom-16 left-4 text-sm text-danger">{t.common.loadFailed(errorText(detail.error))}</p>}
 			</div>
+			{slideshow && slideshowSource && <Slideshow source={slideshowSource} startId={id} onClose={() => setSlideshow(false)} />}
 			{showInfo && !immersive && panelAsset && <InfoPanel asset={panelAsset} onClose={() => setShowInfo(false)} onMoved={requestClose} />}
 			{editing && detail.data && (
 				<Editor
