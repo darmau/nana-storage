@@ -141,14 +141,6 @@ function Layout() {
 				<SideLink to="/albums" icon={<IconAlbum />}>
 					{t.albums.title}
 				</SideLink>
-				<Link
-					to="/folders/$folderId"
-					params={{ folderId: "root" }}
-					className={`${sideClass} ${pathname === "/folders/root" ? sideActive.className : ""}`}
-				>
-					<IconFolder />
-					{t.folders.title}
-				</Link>
 				<FoldersNav />
 				<SideLink to="/favorites" icon={<IconHeart />}>
 					{t.favorites.title}
