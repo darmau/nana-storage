@@ -509,6 +509,8 @@ export const en: Messages = {
 		unfinished: (n: number) => `${fmtNumber(n)} unfinished`,
 		noName: "(no file name)",
 		emptyDir: "Empty folder",
+		expand: "Expand subfolders",
+		collapse: "Collapse subfolders",
 	},
 	unfinished: {
 		trashTitle: (n: number) => `Move ${count(n, "item", "items")} to Trash?`,

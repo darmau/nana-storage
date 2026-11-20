@@ -28,6 +28,7 @@ export type VersionGroup = "library" | "people" | "smart_sets";
 const CONDITIONAL: [RegExp, VersionGroup[]][] = [
 	[/^\/api\/timeline\/(buckets|month\/[^/]+)$/, ["library"]],
 	[/^\/api\/map\/(points|assets)$/, ["library"]],
+	[/^\/api\/folders$/, ["library"]],
 	[/^\/api\/folders\/[^/]+(\/assets)?$/, ["library"]],
 	[/^\/api\/(bursts|albums)\/[^/]+\/assets$/, ["library"]],
 	[/^\/api\/albums(\/[^/]+)?$/, ["library"]],

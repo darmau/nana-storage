@@ -505,6 +505,8 @@ export const zhCN = {
 		colSize: "尺寸",
 		unfinished: (n: number) => `${n} 项未完成`,
 		noName: "（没有文件名）",
+		expand: "展开子文件夹",
+		collapse: "收起子文件夹",
 	},
 	/** 文件夹里没处理完的项 */
 	unfinished: {

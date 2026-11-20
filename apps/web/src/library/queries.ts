@@ -81,6 +81,16 @@ export const folderQuery = (id: string) => ({
 	queryKey: ["folders", id],
 	queryFn: () => api<FolderInfo>(`/folders/${id}`),
 });
+export interface FolderTreeNode {
+	id: string;
+	parent_id: string | null;
+	name: string;
+}
+/** 侧边栏文件夹树：全部文件夹一行一个（id / parent_id / name），前端按 parent_id 拼成树。 */
+export const folderTreeQuery = {
+	queryKey: ["folders", "tree"],
+	queryFn: () => api<{ items: FolderTreeNode[] }>("/folders"),
+};
 export const folderUnfinishedQuery = (id: string) => ({
 	queryKey: ["folders", id, "unfinished"],
 	queryFn: () => api<FolderUnfinished>(`/folders/${id}/unfinished`),

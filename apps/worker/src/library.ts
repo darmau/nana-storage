@@ -146,6 +146,19 @@ async function breadcrumb(env: Env, id: string | null): Promise<FolderRow[]> {
 }
 
 /**
+ * GET /api/folders → 全部文件夹（id / parent_id / name），一行一个，侧边栏的文件夹树用。
+ * 只读 folders 表（几百行），前端按 parent_id 拼成树、逐级展开。带 ETag（library 组）。
+ */
+library.get("/folders", async (c) => {
+	const { results } = await c.env.DB.prepare("SELECT id, parent_id, name FROM folders ORDER BY name COLLATE NOCASE").all<{
+		id: string;
+		parent_id: string | null;
+		name: string;
+	}>();
+	return c.json({ items: results });
+});
+
+/**
  * GET /api/folders/:id  （id = "root" 表示根目录）→ 面包屑 + 子文件夹（张数、体积、最近修改时间和封面包括所有子文件夹里的，封面最多 9 张）。
  * 设置了自定义封面（folders.cover_asset_id）而且那张照片可见时，covers 只有它一张；否则照旧是子树里最近拍的几张。
  * 只取决于 folders 和可见的条目，带 ETag（src/dbcache.ts）：打开根目录要按整棵树统计全部照片，没变时只读一行版本号。

@@ -18,6 +18,7 @@ import { CompressPage, OrganizePage, QualityPage } from "./routes/OrganizePages"
 import { DuplicatesPage } from "./routes/DuplicatesPage";
 import { SmartSetPage, SmartSetsPage, validateSmartSetSearch } from "./routes/SmartSetPages";
 import { TimelinePage, validateTimelineSearch } from "./routes/TimelinePage";
+import { FoldersNav } from "./library/FoldersNav";
 import { StorageMeter } from "./library/StorageMeter";
 import { folderSearch, listSearch } from "./library/TypeFilter";
 import { GuardPage } from "./routes/settings/GuardPage";
@@ -143,11 +144,12 @@ function Layout() {
 				<Link
 					to="/folders/$folderId"
 					params={{ folderId: "root" }}
-					className={`${sideClass} ${pathname.startsWith("/folders/") ? sideActive.className : ""}`}
+					className={`${sideClass} ${pathname === "/folders/root" ? sideActive.className : ""}`}
 				>
 					<IconFolder />
 					{t.folders.title}
 				</Link>
+				<FoldersNav />
 				<SideLink to="/favorites" icon={<IconHeart />}>
 					{t.favorites.title}
 				</SideLink>
