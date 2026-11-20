@@ -15,12 +15,16 @@ ARG NANA_FACES=on
 # 用 Immich 导出的 ONNX（固定版本）。换模型时同时改 faces.mjs 的 FACE_MODEL_VER。
 FROM node:24-trixie-slim AS faces-on
 RUN mkdir -m 755 /out
-ADD --chmod=644 --checksum=sha256:5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91 \
-    https://huggingface.co/immich-app/buffalo_l/resolve/d09715916a0778919a770c343533641e250b8699/detection/model.onnx \
-    /out/face-det.onnx
-ADD --chmod=644 --checksum=sha256:4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43 \
-    https://huggingface.co/immich-app/buffalo_l/resolve/d09715916a0778919a770c343533641e250b8699/recognition/model.onnx \
-    /out/face-rec.onnx
+# HF 已迁移到 Xet 存储，resolve 会 302 到 cas-bridge.xethub.hf.co；ADD 的 --checksum 拿不到重定向后的文件，
+# 三个模型都会拿到同一份 HTML（digest 全错）。改用 node 的 fetch（跟随重定向），校验和与权限仍固定、并在同一层里完成。
+RUN set -e; \
+    dl() { \
+        node -e 'fetch(process.argv[1]).then(async (r) => { if (!r.ok) throw new Error(r.status); require("fs").writeFileSync(process.argv[2], Buffer.from(await r.arrayBuffer())); })' "$1" "$2"; \
+        printf '%s  %s\n' "$3" "$2" | sha256sum -c -; \
+        chmod 644 "$2"; \
+    }; \
+    dl "https://huggingface.co/immich-app/buffalo_l/resolve/d09715916a0778919a770c343533641e250b8699/detection/model.onnx" /out/face-det.onnx 5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91; \
+    dl "https://huggingface.co/immich-app/buffalo_l/resolve/d09715916a0778919a770c343533641e250b8699/recognition/model.onnx" /out/face-rec.onnx 4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43
 
 FROM node:24-trixie-slim AS faces-off
 RUN mkdir -m 755 /out
@@ -50,9 +54,13 @@ RUN ONNX_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo arm64 || echo x64) \
 # 那样会在新的一层里把约 280 MB 的模型再存一遍，镜像变大，部署和冷启动都变慢。
 RUN mkdir -m 755 /app/model
 # CLIP ViT-B/32 图像塔（int8 量化，约 89 MB），用来算相似度向量。换模型时同时改 lib.mjs 的 MODEL_VER。
-ADD --chmod=644 --checksum=sha256:583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299 \
-    https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/d15189d7028b43f1d3e65039190477f6af591c2a/onnx/vision_model_quantized.onnx \
-    /app/model/clip-vision.onnx
+# 同样因为 HF 的 Xet 重定向，用 node fetch 下载（见上面 faces-on 的说明）。
+RUN set -e; \
+    node -e 'fetch(process.argv[1]).then(async (r) => { if (!r.ok) throw new Error(r.status); require("fs").writeFileSync(process.argv[2], Buffer.from(await r.arrayBuffer())); })' \
+      "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/d15189d7028b43f1d3e65039190477f6af591c2a/onnx/vision_model_quantized.onnx" \
+      /app/model/clip-vision.onnx; \
+    echo "583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299  /app/model/clip-vision.onnx" | sha256sum -c -; \
+    chmod 644 /app/model/clip-vision.onnx
 
 # 人脸模型来自上面的 faces 阶段（NANA_FACES=off 时没有文件）。
 COPY --from=faces /out/ /app/model/
