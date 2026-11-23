@@ -33,7 +33,7 @@ const HALF = vec((i) => (i < 256 ? 100 : 0)); // 余弦 ≈ 0.707，低于阈值
 const ZERO = vec(() => 0);
 const P0 = "0000000000000000";
 const P1 = "0000000000000001"; // 距离 1
-const PFAR = "000000000000ffff"; // 距离 16，超过阈值
+const PFAR = "00000000ffffffff"; // 距离 32，超过阈值（20）
 const PFF = "ffffffffffffffff";
 
 const T0 = Date.UTC(2024, 5, 1, 10);
@@ -79,9 +79,9 @@ describe("clusterDay", () => {
 	});
 
 	it("compares against the leader, not transitively", () => {
-		// cos(a,b)≈0.98、cos(b,c)≈0.945 都过阈值，但 cos(a,c)≈0.866 不过：c 不能并进 a 的组
-		const mid = vec((i) => (i < 128 ? 60 : 100));
-		const edge = vec((i) => (i < 128 ? 0 : 100));
+		// cos(a,b)≈0.97、cos(b,c)≈0.94 都过阈值（0.86），但 cos(a,c)≈0.83 不过：c 不能并进 a 的组
+		const mid = vec((i) => (i < 256 ? 100 : 60));
+		const edge = vec((i) => (i < 256 ? 100 : 20));
 		const out = clusterDay([row("a", P0, SAME, 1), row("b", P0, mid, 2), row("c", P0, edge, 3)]);
 		expect(out.get("b")).toBe(out.get("a"));
 		expect(out.get("c")).toBeNull();

@@ -183,11 +183,12 @@ export const DUPLICATE_SCAN_MAX = 200_000;
  * 相似照片折叠（时间线，src/stacks.ts）：同一天里背景 / 构图相似的一系列照片折叠成一张封面，右下角 +N。
  * 只用 D1 里已有的指纹（phash + CLIP 向量），不用 Vectorize、不启动容器、没有新的队列或 Cron。
  * 判定是“双阈值”：phash 汉明距离 ≤ STACK_MAX_HAMMING 而且余弦 ≥ STACK_MIN_COSINE。
- * 比重复照片（≤4 / ≥0.96）宽松：系列图主体不同、背景相似。两个值要按真实库校准，
+ * 比重复照片（≤4 / ≥0.96）宽松：系列图主体不同、背景相似。phash 只看明暗布局，主体变化大时
+ * 距离能到十几到二十几；CLIP 看语义，同系列通常 ≥ 0.86。两个值要按真实库校准，
  * 改完后在设置页重新整理一次即可全库生效（补建可重跑）。
  */
-export const STACK_MAX_HAMMING = 12;
-export const STACK_MIN_COSINE = 0.9;
+export const STACK_MAX_HAMMING = 20;
+export const STACK_MIN_COSINE = 0.86;
 /** 每组最多这么多张：超过就不再往里加（防止白底文档 / 截图并成巨型组）。 */
 export const STACK_MAX_MEMBERS = 100;
 /**
