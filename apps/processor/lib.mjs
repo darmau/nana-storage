@@ -24,6 +24,8 @@ import { frost, frostSize, netpbm, parseMask, rasterizeMask } from "./mask.mjs";
  *                       响应里的 mask 原样带回实际用过的笔画，Worker 据此确认（旧版容器不认这个头，不能悄悄生成没打码的预览）。
  *                       faces：{ model, faces: [{ x, y, w, h, px, score, sharpness, embedding }], sprite }，见 faces.mjs。视频不算。
  *   /tasks/transcode  → video/mp4（带 Content-Length）
+ *   /tasks/poster     → 从视频抽一帧做 Live Photo 封面（posterTask）：JSON 加紧跟着的 JPEG（x-json-length，同 compress）。
+ *                       x-at-ms：帧的时间（毫秒）。响应 in 是输入视频的校验和（完整性校验），out 是抽出来的 JPEG。
  *   /tasks/compress   → 原图压缩（compressTask）：JSON 加紧跟着的压缩后的 JPEG（x-json-length，同 derive 的 stream）。
  *   /tasks/compose    → 拼接 / 切割（composeTask）：请求体是几个原件首尾相接（saveInputs），响应同 compress。
  *
@@ -635,6 +637,33 @@ export async function transcodeTask(input, dir, { timeoutMs }) {
 		{ timeoutMs, capture: false },
 	);
 	return out;
+}
+
+/**
+ * 从视频抽一帧做 Live Photo 封面（用户选的时间）。ffmpeg 默认 autorotate，抽出来已经是显示方向；
+ * 全分辨率、高质量 JPEG。返回 { body, outPath }：body.in 是输入视频的校验和（Worker 做完整性校验），
+ * body.out 是抽出来的 JPEG 的 sha256 / 大小 / CRC32 / 像素尺寸。
+ */
+export async function posterTask(input, dir, { atMs }) {
+	if (!Number.isFinite(atMs) || atMs < 0) throw new Error("bad at-ms");
+	const out = join(dir, "poster.jpg");
+	await run(
+		"ffmpeg",
+		["-v", "error", "-ss", String(atMs / 1000), "-i", input.path, "-frames:v", "1", "-q:v", "2", "-y", out],
+		{ timeoutMs: 60_000, capture: false },
+	);
+	const buf = await readFile(out);
+	const body = {
+		in: { sha256: input.sha256, size: input.size, crc32: input.crc32 },
+		out: {
+			sha256: createHash("sha256").update(buf).digest("hex"),
+			size: buf.length,
+			crc32: crc32(buf) >>> 0,
+			width: await header(out, "width"),
+			height: await header(out, "height"),
+		},
+	};
+	return { body, outPath: out };
 }
 
 // ---------------------------------------------------------------- 原图压缩（/tasks/compress）

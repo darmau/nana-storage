@@ -3,7 +3,7 @@ import { COMPRESS_BATCH_MAX, type ComposeDirection } from "@nana/shared";
 import { api } from "../api";
 import { collapseStack } from "../timeline/expand";
 import { armLibrarySync } from "./sync";
-import { watchCompose } from "./processing";
+import { watchCompose, watchLivePhoto } from "./processing";
 
 export type BatchAction =
 	| { action: "favorite"; value: boolean }
@@ -74,6 +74,16 @@ function afterCompose(qc: QueryClient, sourceIds: string[], newIds: string[]) {
 	armLibrarySync();
 	// 原照片叠遮罩，直到新照片处理好（之后原照片移进回收站）
 	watchCompose(sourceIds, newIds, () => invalidateLibrary(qc));
+}
+
+/** 短视频转 Live Photo：同一个条目从视频变成 Live Photo，转换完成前盖遮罩，完成后列表自己更新。 */
+export async function convertToLivePhoto(qc: QueryClient, id: string, atMs: number) {
+	const res = await api<{ ok: true }>("/live-photo", { method: "POST", json: { id, atMs } });
+	invalidateLibrary(qc);
+	void qc.invalidateQueries({ queryKey: ["jobs"] });
+	armLibrarySync();
+	watchLivePhoto(id, () => invalidateLibrary(qc));
+	return res;
 }
 
 export async function addToAlbum(qc: QueryClient, albumId: string, ids: string[]) {

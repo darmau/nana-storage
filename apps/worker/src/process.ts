@@ -12,6 +12,7 @@ import { compressAsset } from "./compress";
 import { derivedKey } from "./derived";
 import { parseMeta, type Meta } from "./exif";
 import { handlers, type RunningJob } from "./jobs";
+import { LOCK_LOCATION, LOCK_TIME } from "./library";
 import { type DeriveOutput, processorStub } from "./processor";
 import { saveFaces } from "./people";
 import { deleteSearchRows, replaceSearchRow } from "./search";
@@ -122,7 +123,7 @@ export const previewEdgeOf = (a: Pick<AssetRow, "preview_target">) => Math.max(P
 /** 剩下的时间不够这么多就不转码了。 */
 const MIN_TRANSCODE_TIMEOUT_MS = 30_000;
 
-export type ProcessorLike = Pick<ReturnType<typeof processorStub>, "derive" | "meta" | "transcode" | "compress" | "compose">;
+export type ProcessorLike = Pick<ReturnType<typeof processorStub>, "derive" | "meta" | "transcode" | "poster" | "compress" | "compose">;
 export type GetProcessor = (env: Env, slot: number) => ProcessorLike;
 
 /** getProcessor 可以替换，方便测试时不启动容器。 */
@@ -425,6 +426,124 @@ export async function rotateAsset(
 	return { containerSeconds: dr.containerSeconds };
 }
 
+/** 短视频转 Live Photo 的封面文件名（去掉视频扩展名，加 _live.jpg）。 */
+const posterStem = (name: string | null) => (name ?? "video").replace(/\.[^.]*$/, "") || "video";
+
+/**
+ * livephoto 任务：把短视频条目变成 Live Photo。用户选的一帧抽出来作为封面（原件 original，JPEG），
+ * 视频原件成为动态部分（live_video）。和 Live Photo 的动态部分一样，不转码：浏览器不能解码视频时只显示静态封面。
+ *
+ * 步骤：抽帧（1 次 poster）→ 用封面重新生成缩略图 / 预览 + 指纹 + 人脸（1 次 derive）→ 一个 batch 里完成
+ * 角色对换、写入封面、改 kind、删旧派生文件。batch 是原子且最后的操作：要么整体提交（重试时看到 kind 已是 live 直接返回），
+ * 要么什么都没改、原样重试。每次尝试一个新的封面 key，失败的删掉（和 compose 一样）。
+ * 拍摄时间、地点、描述、相机、镜头、文件夹、收藏、归档都沿用原来的（不动这些列），时间和地点记成 meta_locked，
+ * 防止以后被重新处理时清掉。
+ */
+export async function livephotoAsset(
+	job: RunningJob,
+	env: Env,
+	getProcessor: GetProcessor = processorStub,
+): Promise<{ containerSeconds: number }> {
+	let seconds = 0;
+	const spec = await env.DB.prepare("SELECT at_ms FROM livephoto_specs WHERE asset_id = ?")
+		.bind(job.asset_id)
+		.first<{ at_ms: number }>();
+	if (!spec) return { containerSeconds: 0 }; // 条目已经删掉（随条目级联删除）
+
+	const [assetRes, filesRes] = await env.DB.batch<AssetRow | FileRow>([
+		env.DB.prepare(`SELECT ${ASSET_COLUMNS} FROM assets WHERE id = ?`).bind(job.asset_id),
+		env.DB.prepare("SELECT id, role, r2_key, mime, size, sha256, original_name FROM asset_files WHERE asset_id = ?").bind(job.asset_id),
+	]);
+	const asset = assetRes!.results[0] as AssetRow | undefined;
+	if (!asset || asset.deleted_at || asset.kind !== "video") return { containerSeconds: 0 };
+	const files = filesRes!.results as FileRow[];
+	const video = files.find((f) => f.role === "original");
+	if (!video) throw new JobError("video has no source file", 0, true);
+
+	const proc = getProcessor(env, job.slot);
+	const rev = asset.derived_rev + 1;
+	const posterKey = `o/${job.asset_id}/lp-${job.id}-${job.attempts}.jpg`;
+	const written = new Set<string>([posterKey]);
+	const fail = async (message: string, permanent = false): Promise<never> => {
+		if (written.size) await env.PHOTOS.delete([...written]).catch(() => {});
+		throw new JobError(message, seconds, permanent);
+	};
+
+	// 抽封面
+	const pr = await proc.poster(video.r2_key, posterKey, spec.at_ms);
+	seconds += pr.containerSeconds;
+	if (!pr.ok || !pr.value) return fail(`poster: ${pr.error}`);
+	const p = pr.value;
+	if (p.in.sha256 !== video.sha256 || p.in.size !== video.size) {
+		return fail("integrity check failed (video sha256/size mismatch)", true);
+	}
+	if (p.out.width <= 0 || p.out.height <= 0) return fail("poster has no dimensions", true);
+
+	// 用封面重新生成缩略图 / 预览（指纹、人脸一起算）
+	const targets = deriveTargets({ ...asset, derived_rev: rev });
+	written.add(targets.thumbKey);
+	written.add(targets.previewKey);
+	written.add(derivedKey(asset.id, "faces", rev, "webp")); // saveFaces 可能写的人脸拼图，失败时一起删
+	const previewEdge = previewEdgeOf(asset);
+	const dr = await proc.derive({ inputKey: posterKey, kind: "image", rotation: 0, ...targets, previewEdge });
+	seconds += dr.containerSeconds;
+	if (!dr.ok || !dr.value) return fail(`derive: ${dr.error}`);
+	const d = dr.value;
+	if (d.sha256 !== p.out.sha256 || d.size !== p.out.size) {
+		return fail("integrity check failed (poster sha256/size mismatch)", true);
+	}
+
+	// 封面恰好和另一张原图完全一样（去重唯一索引）时重试也没用
+	const dup = await env.DB.prepare("SELECT 1 FROM asset_files WHERE sha256 = ? AND role IN ('original','raw','live_video')")
+		.bind(p.out.sha256)
+		.first();
+	if (dup) return fail("poster identical to an existing original", true);
+
+	const now = Date.now();
+	const posterName = `${posterStem(video.original_name)}_live.jpg`;
+	const names = files.map((f) => f.original_name).filter(Boolean).join(" ");
+	const oldDerived = files.filter((f) => ["thumb", "preview", "video_preview"].includes(f.role)).map((f) => f.r2_key);
+
+	try {
+		// 指纹、人脸先写：写失败会重试（重试时 kind 还是 video，整个流程重跑一遍，saveFingerprint / saveFaces 都是幂等的）。
+		// 放在 batch 前面，避免“batch 提交了、后面的指纹 / 人脸写失败，重试时看到 kind 已经是 live 直接跳过”留下没算的指纹 / 人脸。
+		const fpOk = await saveFingerprint(env, asset.id, d.fp);
+		if (fpOk) await maybeStack(env, asset.id);
+		await saveFaces(env, asset.id, d.faces, rev);
+
+		await env.DB.batch([
+			// 视频原件变成动态部分（dedupe 唯一索引仍在 original/raw/live_video 里，同一行不冲突）
+			env.DB.prepare("UPDATE asset_files SET role = 'live_video' WHERE id = ? AND role = 'original' AND sha256 = ?").bind(
+				video.id,
+				video.sha256,
+			),
+			// 旧的 H.264 预览没用了（Live Photo 的动态部分不转码）
+			env.DB.prepare("DELETE FROM asset_files WHERE asset_id = ? AND role = 'video_preview'").bind(asset.id),
+			// 插入封面（original）
+			env.DB.prepare(
+				`INSERT INTO asset_files (id, asset_id, role, r2_key, mime, size, sha256, crc32, original_name, created_at)
+				 VALUES (?, ?, 'original', ?, 'image/jpeg', ?, ?, ?, ?, ?)`,
+			).bind(ulid(), asset.id, posterKey, p.out.size, p.out.sha256, p.out.crc32, posterName, now),
+			// 缩略图 / 预览换成新版本
+			...replaceDerivedFiles(env, asset.id, targets, d, now),
+			// 条目变成 Live Photo，尺寸换成封面的（抽帧时已经转正，rotation 仍是 0）
+			env.DB.prepare(
+				`UPDATE assets SET kind = 'live', derived_rev = ?, width = ?, height = ?, status = 'ready',
+					preview_edge = ?, meta_locked = meta_locked | ${LOCK_TIME | LOCK_LOCATION}, updated_at = ? WHERE id = ?`,
+			).bind(rev, p.out.width, p.out.height, previewEdge, now, asset.id),
+			env.DB.prepare("DELETE FROM livephoto_specs WHERE asset_id = ?").bind(asset.id),
+			...replaceSearchRow(env, asset.id, `${names} ${posterName}`.trim()),
+		]);
+	} catch (e) {
+		return fail(`livephoto write failed: ${String(e).slice(0, 300)}`);
+	}
+
+	// 旧的派生文件（旧版本的缩略图、预览、H.264 预览）在 R2 里没有别的引用，删掉；失败不影响结果
+	if (oldDerived.length) await env.PHOTOS.delete(oldDerived).catch(() => {});
+	console.log(JSON.stringify({ event: "livephoto_done", assetId: asset.id, atMs: spec.at_ms }));
+	return { containerSeconds: seconds };
+}
+
 /** 各类任务用指定的 Processor 运行。设备端处理用它：Processor 换成设备预先算好的结果（见 device.ts）。 */
 export const processorHandlers: Record<
 	JobKind,
@@ -435,9 +554,12 @@ export const processorHandlers: Record<
 	compress: compressAsset,
 	// 设备端不认领 compose 任务（device.ts），这里只是让类型完整
 	compose: (job, env, getProcessor) => composeAsset(job, env, getProcessor),
+	// 设备端也不认领 livephoto 任务（转 Live Photo 只在容器里做）
+	livephoto: (job, env, getProcessor) => livephotoAsset(job, env, getProcessor),
 };
 
 handlers.process = (job, env) => processAsset(job, env);
 handlers.rotate = (job, env) => rotateAsset(job, env);
 handlers.compress = (job, env) => compressAsset(job, env);
 handlers.compose = (job, env) => composeAsset(job, env);
+handlers.livephoto = (job, env) => livephotoAsset(job, env);

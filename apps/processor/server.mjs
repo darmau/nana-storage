@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
-import { composeTask, compressTask, deriveTask, metaTask, parseCrop, saveInput, saveInputs, transcodeTask } from "./lib.mjs";
+import { composeTask, compressTask, deriveTask, metaTask, parseCrop, posterTask, saveInput, saveInputs, transcodeTask } from "./lib.mjs";
 
 /**
  * 容器的 HTTP 外壳。处理代码在 lib.mjs（设备端处理共用），任务（都是 POST，请求体是原始文件）：
@@ -20,6 +20,8 @@ import { composeTask, compressTask, deriveTask, metaTask, parseCrop, saveInput, 
  *                       x-mask：打码的笔画（mask.mjs，最多约 11 KB）：缩略图和预览上盖住的地方变成毛玻璃，同样返回底图 base；
  *                       响应的 mask 原样带回。
  *   /tasks/transcode  → video/mp4（带 Content-Length）
+ *   /tasks/poster     → JSON { in: { sha256, size, crc32 }, out: { sha256, size, crc32, width, height } } + 紧跟着的 JPEG（同 compress）。
+ *                       x-at-ms：帧的时间（毫秒）。
  *   /tasks/compress   → JSON { sha256, size, crc32, skipped, out } + 紧跟着的压缩后的 JPEG（x-json-length 是 JSON 的字节数；
  *                       不压缩时只有 JSON）。x-quality、x-min-saving、x-max-bytes、x-max-diff、x-max-pixels（0 不缩小）见 shared 的 COMPRESS_*。
  *   /tasks/compose    → JSON { inputs: [{ sha256, size, crc32 }], out: { sha256, size, crc32, width, height } } + 紧跟着的 JPEG（同 compress）。
@@ -80,6 +82,20 @@ const tasks = {
 		const { size } = await stat(out);
 		res.writeHead(200, { "content-type": "video/mp4", "content-length": String(size) });
 		await pipeline(createReadStream(out), res);
+	},
+
+	async poster(req, res, dir) {
+		const atMs = Number(req.headers["x-at-ms"]);
+		const { body, outPath } = await posterTask(await receive(req, dir), dir, { atMs });
+		const head = Buffer.from(JSON.stringify(body));
+		const { size } = await stat(outPath);
+		res.writeHead(200, {
+			"content-type": "application/octet-stream",
+			"content-length": String(head.length + size),
+			"x-json-length": String(head.length),
+		});
+		res.write(head);
+		await pipeline(createReadStream(outPath), res);
 	},
 
 	async compress(req, res, dir) {

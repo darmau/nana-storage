@@ -12,6 +12,7 @@ import {
 	CONTAINER_INACTIVITY_MS,
 	FULL_PREVIEW_TIMEOUT_MS,
 	IMAGE_JOB_TIMEOUT_MS,
+	LIVE_POSTER_TIMEOUT_MS,
 	PREVIEW_LONG_EDGE,
 	PRICING,
 	PROCESSOR_POOL_SIZE,
@@ -118,6 +119,11 @@ export interface MetaOutput {
 }
 export interface TranscodeOutput {
 	size: number;
+}
+/** 短视频转 Live Photo 的抽帧（lib.mjs 的 posterTask）：in 是输入视频的校验和，out 是抽出来的封面 JPEG。 */
+export interface PosterOutput {
+	in: { sha256: string; size: number; crc32: number };
+	out: { sha256: string; size: number; crc32: number; width: number; height: number };
 }
 /** 原图压缩（lib.mjs 的 compressTask）。sha256 / size 是输入的（完整性校验）；skipped 不为 null 时没有 out，也没有写 R2。 */
 export interface CompressOutput {
@@ -370,6 +376,34 @@ export class Processor extends DurableObject<Env> {
 					this.env.PHOTOS.put(outputKey, fixed.readable, { httpMetadata: { contentType: "video/mp4" } }),
 				]);
 				return { size: written.size };
+			},
+		);
+	}
+
+	/**
+	 * 从视频抽一帧做 Live Photo 封面：容器返回 JSON + JPEG，后半段直接流进 R2 的 outputKey。
+	 * R2 按容器算的 sha256 校验写入的字节。调用方校验 in（输入视频）和 out（封面）的完整性。
+	 */
+	async poster(inputKey: string, outputKey: string, atMs: number): Promise<Result<PosterOutput>> {
+		return this.call(
+			"poster",
+			inputKey,
+			{ "x-at-ms": String(atMs) },
+			LIVE_POSTER_TIMEOUT_MS,
+			async (res) => {
+				const total = Number(res.headers.get("content-length"));
+				const jsonLength = Number(res.headers.get("x-json-length"));
+				if (!res.body || !(total > jsonLength && jsonLength > 0)) throw new Error("poster returned a malformed stream");
+				const { head, rest } = await splitStream(res.body, jsonLength);
+				const body = JSON.parse(new TextDecoder().decode(head)) as PosterOutput;
+				if (total - jsonLength !== body.out.size) throw new Error("poster returned a wrong length");
+				const fixed = new FixedLengthStream(body.out.size);
+				const [, written] = await Promise.all([
+					rest.pipeTo(fixed.writable),
+					this.env.PHOTOS.put(outputKey, fixed.readable, { httpMetadata: { contentType: "image/jpeg" }, sha256: body.out.sha256 }),
+				]);
+				if (written.size !== body.out.size) throw new Error("poster output size mismatch");
+				return body;
 			},
 		);
 	}

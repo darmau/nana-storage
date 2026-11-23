@@ -103,6 +103,17 @@ export const MAX_TRANSCODE_DURATION_MS = 5 * 60 * 1000;
 export const transcodeTimeoutMs = (durationMs: number) =>
 	Math.min(12 * 60_000, 60_000 + Math.ceil(durationMs / 1000) * 4000);
 
+// ---------------------------------------------------------------- 短视频转 Live Photo（src/livephoto.ts）
+
+/**
+ * 只有时长不超过这个的视频才能转成 Live Photo（Live Photo 的动态部分应该是几秒，30 秒是上限）。
+ * 转换把视频变成 Live Photo：视频原件成为 live_video，用户选的一帧抽出来作为封面（original，JPEG）。
+ * 只由用户点击触发，每个视频 1 个 livephoto 任务：1 次抽帧（ffmpeg 取一帧）+ 1 次 derive（缩略图、预览、指纹、人脸）。
+ */
+export const MAX_LIVE_DURATION_MS = 30_000;
+/** 抽帧的硬超时：定位到指定时间、解码一帧并编码 JPEG，几秒足够；定位到视频末尾时 seek 可能稍慢。 */
+export const LIVE_POSTER_TIMEOUT_MS = 60_000;
+
 /** 上传分块大小（Worker 请求体上限是 100 MB）。 */
 export const UPLOAD_PART_BYTES = 20 * 1024 ** 2;
 

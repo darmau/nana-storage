@@ -63,3 +63,19 @@ export function watchCompose(sourceIds: readonly string[], newIds: readonly stri
 		onDone();
 	})();
 }
+
+/** 短视频转 Live Photo：转换在同一个条目上完成，没有新条目。等这个条目没有排队 / 运行中的任务时去掉遮罩。 */
+export function watchLivePhoto(assetId: string, onDone: () => void) {
+	markProcessing([assetId]);
+	void (async () => {
+		try {
+			for (let i = 0; i < COMPOSE_POLL_MAX; i++) {
+				await new Promise((res) => setTimeout(res, COMPOSE_POLL_MS));
+				const a = await api<AssetDetail>(`/assets/${assetId}`);
+				if (!a.jobs_active) break;
+			}
+		} catch {}
+		unmarkProcessing([assetId]);
+		onDone();
+	})();
+}

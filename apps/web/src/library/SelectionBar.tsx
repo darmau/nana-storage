@@ -1,8 +1,10 @@
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
-import { containerCost, type GuardStatus } from "@nana/shared";
+import { useNavigate } from "@tanstack/react-router";
+import { containerCost, MAX_LIVE_DURATION_MS, type GuardStatus } from "@nana/shared";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api, errorText } from "../api";
 import { t } from "../i18n";
+import { KIND_VIDEO } from "../timeline/types";
 import { confirmDialog } from "../ui/confirm";
 import { type MenuItem, openMenuAt } from "../ui/ContextMenu";
 import {
@@ -16,6 +18,7 @@ import {
 	IconEdit,
 	IconFolderMove,
 	IconHeart,
+	IconLive,
 	IconMinus,
 	IconMore,
 	IconPeople,
@@ -280,13 +283,16 @@ export function AssetActionsProvider({ context, children }: { context: BarContex
  */
 export function useAssetMenu() {
 	const qc = useQueryClient();
+	const navigate = useNavigate();
 	const { selected, toggle } = useSelection();
 	const { context, run, pick, download } = useAssetActions();
 
-	/** group：连拍 / 相似照片封面代表的整组，没有选中别的照片时，操作作用于整组。stackId：相似照片组（多了“不折叠这组”）。 */
-	return (id: string, favorite: boolean, onOpen: (id: string) => void, group?: string[], stackId?: string): MenuItem[] => {
+	/** group：连拍 / 相似照片封面代表的整组，没有选中别的照片时，操作作用于整组。stackId：相似照片组（多了“不折叠这组”）。
+	 * kind / duration：这个条目本身的类型和时长（转 Live Photo 只在单个视频、30 秒以内时提供）。 */
+	return (id: string, favorite: boolean, onOpen: (id: string) => void, group?: string[], stackId?: string, kind?: 0 | 1 | 2, duration?: number | null): MenuItem[] => {
 		const multi = selected.has(id) && selected.size > (group?.length ?? 1);
 		const ids = multi ? [...selected] : (group ?? [id]);
+		const canLive = !multi && !group && kind === KIND_VIDEO && duration !== null && duration !== undefined && duration > 0 && duration <= MAX_LIVE_DURATION_MS;
 		const head: MenuItem[] = multi
 			? [{ heading: t.actions.selected(ids.length) }]
 			: [
@@ -368,6 +374,9 @@ export function useAssetMenu() {
 			{ label: t.actions.moveToFolderMenu, icon: <IconFolderMove size={18} />, onSelect: () => pick("folder", ids) },
 			{ label: t.actions.addToTopicMenu, icon: <IconSimilar size={18} />, onSelect: () => pick("smartSet", ids) },
 			{ label: t.actions.editMetaMenu, icon: <IconEdit size={18} />, onSelect: () => pick("meta", ids) },
+			...(canLive
+				? [{ label: t.actions.toLivePhoto, icon: <IconLive size={18} />, onSelect: () => void navigate({ to: "/live/$assetId", params: { assetId: id } }) }]
+				: []),
 			composeItem(ids, pick, true),
 			{ label: multi ? t.actions.download : t.actions.downloadOriginal, icon: <IconDownload size={18} />, onSelect: () => download(ids) },
 		];

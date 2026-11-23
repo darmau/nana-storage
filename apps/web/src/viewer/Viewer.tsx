@@ -1,5 +1,7 @@
 import type { CropBox } from "@nana/shared";
+import { MAX_LIVE_DURATION_MS } from "@nana/shared";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { api, errorText } from "../api";
@@ -115,6 +117,7 @@ const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)")
 
 export function Viewer({ id, nav, onNavigate, onClose, context = "library", personId, slideshowSource }: Props) {
 	const qc = useQueryClient();
+	const navTo = useNavigate();
 	const item = nav.item;
 	const detail = useQuery({ queryKey: ["asset", id], queryFn: () => api<AssetDetail>(`/assets/${id}`) });
 	const [showInfo, setShowInfo] = useState(false);
@@ -377,6 +380,8 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 	const taken = detail.data ? formatTakenParts(detail.data.taken_at, detail.data.tz_offset_min) : null;
 	const dims: [number, number] | null = item?.[1] && item[2] ? [item[1], item[2]] : detail.data ? displayDims(detail.data) : null;
 	const canEdit = context !== "trash" && kind !== KIND_VIDEO && !!detail.data && detail.data.id === id;
+	const dms = detail.data?.duration_ms ?? null;
+	const canConvertToLive = context !== "trash" && kind === KIND_VIDEO && !!detail.data && detail.data.id === id && dms !== null && dms > 0 && dms <= MAX_LIVE_DURATION_MS;
 	function startEdit() {
 		if (!canEdit) return;
 		// 后台还在生成上一次编辑（或加载原图）的结果时，底图可能还是旧的
@@ -524,6 +529,11 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 								{kind !== KIND_VIDEO && (
 									<IconButton label={t.viewer.edit} onClick={startEdit} disabled={!canEdit}>
 										<IconEdit />
+									</IconButton>
+								)}
+								{kind === KIND_VIDEO && canConvertToLive && (
+									<IconButton label={t.actions.toLivePhoto} onClick={() => void navTo({ to: "/live/$assetId", params: { assetId: id } })}>
+										<IconLive />
 									</IconButton>
 								)}
 							</>

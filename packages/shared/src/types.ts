@@ -12,8 +12,9 @@ export type FileRole =
 /**
  * compress：原图压缩（src/compress.ts），1 次容器调用，不改缩略图和预览。
  * compose：拼接 / 切割生成的新照片（src/compose.ts），1 次 compose（生成原件）+ 1 次 derive。
+ * livephoto：短视频转 Live Photo（src/livephoto.ts），1 次抽帧（生成封面）+ 1 次 derive。
  */
-export type JobKind = "process" | "rotate" | "compress" | "compose";
+export type JobKind = "process" | "rotate" | "compress" | "compose" | "livephoto";
 
 /** 拼接 / 切割的方向：vertical 上下排列（纵向拼接、横着切），horizontal 左右排列。 */
 export type ComposeDirection = "vertical" | "horizontal";

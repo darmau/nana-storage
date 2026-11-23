@@ -24,6 +24,7 @@ import { stacks } from "./stacks";
 import { timeline } from "./timeline";
 import { cleanupStaleUploads, uploads } from "./uploads";
 import { instagram } from "./instagram";
+import { livephoto } from "./livephoto";
 
 export { Processor } from "./processor";
 export { UsageGuard } from "./guard";
@@ -78,6 +79,7 @@ api.route("/device", device);
 api.route("/compress", compress);
 api.route("/quality", quality);
 api.route("/compose", compose);
+api.route("/live-photo", livephoto);
 api.route("/", library);
 api.route("/", similar);
 api.route("/", people);

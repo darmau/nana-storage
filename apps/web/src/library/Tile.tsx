@@ -101,7 +101,7 @@ export const Tile = memo(function Tile({ item, top, left, width, height, scope, 
 			onContextMenu={(e) => {
 				// 触屏长按是多选，不弹菜单
 				if (lastPointer.current === "touch") return e.preventDefault();
-				openContextMenu(e, menu(id, favorite === 1, onOpen, burst, stack));
+				openContextMenu(e, menu(id, favorite === 1, onOpen, burst, stack, kind, duration));
 			}}
 		>
 			<button

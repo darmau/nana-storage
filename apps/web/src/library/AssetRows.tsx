@@ -196,7 +196,7 @@ const Row = memo(function Row({
 			onMouseDown={(e) => e.shiftKey && e.preventDefault()}
 			onContextMenu={(e) => {
 				if (lastPointer.current === "touch") return e.preventDefault();
-				openContextMenu(e, menu(id, favorite === 1, onOpen));
+				openContextMenu(e, menu(id, favorite === 1, onOpen, undefined, undefined, kind, duration));
 			}}
 		>
 			<button

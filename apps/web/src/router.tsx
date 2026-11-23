@@ -16,6 +16,7 @@ import { StatsPage } from "./routes/StatsPage";
 import { PeoplePage, PersonPage } from "./routes/PeoplePages";
 import { CompressPage, OrganizePage, QualityPage } from "./routes/OrganizePages";
 import { DuplicatesPage } from "./routes/DuplicatesPage";
+import { LivePhotoPage } from "./routes/LivePhotoPage";
 import { SmartSetPage, SmartSetsPage, validateSmartSetSearch } from "./routes/SmartSetPages";
 import { TimelinePage, validateTimelineSearch } from "./routes/TimelinePage";
 import { FoldersNav } from "./library/FoldersNav";
@@ -318,6 +319,7 @@ const routeTree = rootRoute.addChildren([
 	createRoute({ getParentRoute: () => rootRoute, path: "/smart-sets", component: SmartSetsPage }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/smart-sets/$setId", component: SmartSetPage, validateSearch: validateSmartSetSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/duplicates", component: DuplicatesPage, validateSearch: viewerSearch }),
+	createRoute({ getParentRoute: () => rootRoute, path: "/live/$assetId", component: LivePhotoPage }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/organize", component: OrganizePage }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/compress", component: CompressPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/quality", component: QualityPage, validateSearch: viewerSearch }),
