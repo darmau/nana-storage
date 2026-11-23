@@ -33,6 +33,8 @@ export function LivePhotoPage() {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const thumbRef = useRef<HTMLVideoElement>(null);
 	const [thumbs, setThumbs] = useState<{ t: number; url: string }[]>([]);
+	/** 视频帧的宽高比（时间轴缩略图按它排版，避免被压扁 / 拉长） */
+	const [aspect, setAspect] = useState(16 / 9);
 
 	// 优先用 H.264 预览（所有浏览器都能解码、抽帧）；没有就用原件。
 	const src = a
@@ -50,9 +52,15 @@ export function LivePhotoPage() {
 			const dur = v.duration;
 			if (!Number.isFinite(dur) || dur <= 0) return;
 			const n = filmstripFrames(dur * 1000);
+			// 画布比例和视频一致，抽帧时不会被压扁 / 拉长；高度按 2x（时间轴高 70px）
+			const vw = v.videoWidth;
+			const vh = v.videoHeight;
+			const ratio = vw && vh ? vw / vh : 16 / 9;
+			setAspect(ratio);
 			const canvas = document.createElement("canvas");
-			canvas.width = 112;
-			canvas.height = 70;
+			const H = 140;
+			canvas.height = H;
+			canvas.width = Math.max(1, Math.round(H * ratio));
 			const ctx = canvas.getContext("2d");
 			if (!ctx) return;
 			const out: { t: number; url: string }[] = [];
@@ -157,14 +165,15 @@ export function LivePhotoPage() {
 
 			<div className="shrink-0 px-[max(1rem,var(--safe-left))] pb-[max(1rem,var(--safe-bottom))] pt-3">
 				{thumbs.length > 0 && (
-					<div className="mb-3 flex gap-1 overflow-x-auto pb-1">
+					<div className="mb-3 grid w-full gap-1" style={{ gridTemplateColumns: `repeat(${thumbs.length}, minmax(0, 1fr))` }}>
 						{thumbs.map((th) => (
 							<button
 								key={th.t}
 								type="button"
 								aria-label={formatDuration(th.t)}
 								onClick={() => scrub(th.t)}
-								className={`relative h-[70px] w-[112px] shrink-0 overflow-hidden rounded-md ring-2 transition ${
+								style={{ aspectRatio: String(aspect) }}
+								className={`relative overflow-hidden rounded-md ring-2 transition ${
 									Math.abs(atMs - th.t) <= durationMs / filmstripFrames(durationMs) / 2 ? "ring-accent" : "ring-transparent opacity-70 hover:opacity-100"
 								}`}
 							>
