@@ -16,6 +16,7 @@ import { type DeriveOutput, processorStub } from "./processor";
 import { saveFaces } from "./people";
 import { deleteSearchRows, replaceSearchRow } from "./search";
 import { saveFingerprint } from "./similar";
+import { maybeStack } from "./stacks";
 import { ulid } from "./ulid";
 
 /**
@@ -223,7 +224,9 @@ export async function processAsset(
 	]);
 
 	if (!parsed.burstUuid && asset.kind === "photo") await groupBurst(env, asset.id);
-	await saveFingerprint(env, asset.id, d.fp);
+	const fpOk = await saveFingerprint(env, asset.id, d.fp);
+	// 指纹写成功后顺带做相似照片分组（只读当天的候选，失败不影响任务）
+	if (fpOk) await maybeStack(env, asset.id);
 	if (asset.kind !== "video") await saveFaces(env, asset.id, d.faces, rev);
 
 	const cid = parsed.contentIdentifier ?? videoParsed?.contentIdentifier ?? null;

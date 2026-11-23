@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { FP_MODEL_VER } from "@nana/shared";
 import { deleteSearchRows, replaceSearchRow, searchSource, updateSearchDescription } from "../src/search";
 import { refreshSmartSet } from "../src/similar";
+import { maybeStack, rebuildStacksChunk } from "../src/stacks";
 import { authHeaders, mockAccessJwks } from "./helpers";
 
 /**
@@ -139,6 +140,16 @@ for (const stats of [false, true]) describe(`list query plans ${stats ? "with sk
 		)
 			.bind(ID(1))
 			.run();
+		// 相似照片折叠：给前两张一个组，指纹供增量分组 / 补建的查询计划检查用
+		await env.DB.prepare("UPDATE assets SET stack_id = 's:QPSTACK0000000000000000000' WHERE id IN (?, ?)").bind(ID(1), ID(2)).run();
+		await env.DB.batch(
+			Array.from({ length: 10 }, (_, i) =>
+				env.DB.prepare(
+					`INSERT OR IGNORE INTO asset_fp (asset_id, model, phash, b0, b1, b2, b3, b4, embedding, updated_at)
+					 VALUES (?, ?, '0000000000000000', 0, 0, 0, 0, 0, randomblob(512), 0)`,
+				).bind(ID(i + 1), FP_MODEL_VER),
+			),
+		);
 	});
 
 	const cases: [string, string, RegExp][] = [
@@ -156,6 +167,7 @@ for (const stats of [false, true]) describe(`list query plans ${stats ? "with sk
 		["archive", "/archive/assets", /assets_archived_visible/],
 		["archive filtered by type", "/archive/assets?type=burst", /assets_archived_visible/],
 		["burst", `/bursts/${ID(1)}/assets`, /assets_burst/],
+		["stack", "/stacks/s:QPSTACK0000000000000000000/assets?day=2024-05-01", /assets_stack/],
 		["person", "/people/QPPERSON00000000000000000A/assets", /faces_person/],
 	];
 	for (const [name, path, index] of cases) {
@@ -313,6 +325,27 @@ for (const stats of [false, true]) describe(`list query plans ${stats ? "with sk
 			const stmt = (await capture(path)).find((s) => s.sql.includes("WITH here"));
 			const p = await plan(stmt!.sql, stmt!.binds);
 			expect(p, p).toMatch(/assets_folder_visible/);
+		}
+	});
+
+	// 相似照片折叠：增量分组只读“当天”的候选（assets_day），补建按天枚举和读取也走它，都不扫全库
+	it("stacking reads only the day's rows via assets_day", async () => {
+		const inc = await captureDirect(() => maybeStack(env, ID(5)));
+		const near = inc.find((s) => s.sql.includes("a.local_day = ?1"));
+		expect(near, "incremental candidate query not found").toBeTruthy();
+		const p1 = await plan(near!.sql, near!.binds);
+		expect(p1, p1).toMatch(/assets_day/);
+		expect(p1, p1).not.toMatch(/assets_timeline/);
+
+		const back = await captureDirect(() => rebuildStacksChunk(env, true));
+		const days = back.find((s) => s.sql.includes("SELECT DISTINCT local_day"));
+		const perDay = back.find((s) => s.sql.includes("a.local_day = ?"));
+		expect(days, "day enumeration query not found").toBeTruthy();
+		expect(perDay, "per-day query not found").toBeTruthy();
+		for (const stmt of [days!, perDay!]) {
+			const p = await plan(stmt.sql, stmt.binds);
+			expect(p, p).toMatch(/assets_day/);
+			expect(p, p).not.toMatch(/assets_timeline/);
 		}
 	});
 });

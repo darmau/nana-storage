@@ -4,9 +4,10 @@ import { useEffect, useMemo, useRef } from "react";
 import { errorText } from "../api";
 import { useScrubbing } from "../library/scrub";
 import { type Anchor, sliceBetween, useSelection } from "../library/selection";
+import { effectiveMonthItems } from "./effective";
 import { estimateMonthHeight, layoutConfig } from "./layout";
 import { MonthSection } from "./MonthSection";
-import { bucketsQuery, monthQuery } from "./queries";
+import { bucketsQuery } from "./queries";
 import { Scrubber } from "./Scrubber";
 import { type Bucket, idsOf } from "./types";
 import { useWidth } from "./useWidth";
@@ -14,7 +15,8 @@ import { t } from "../i18n";
 import { TimelineSkeleton } from "../ui/Skeleton";
 
 /**
- * Shift 范围选择可能跨月（连拍封面代表整组，结果里展开成整组的 id）：从起点所在的月份一路取到终点所在的月份。
+ * Shift 范围选择可能跨月：从起点所在的月份一路取到终点所在的月份。
+ * 每个月的“选择单位”是有效列表（原地展开的组换成成员，逐张可选；折叠的封面代表整组）。
  * 中间没加载过的月份会去请求，但凑够 limit 个就停，所以请求数有上限。
  */
 async function timelineRange(qc: QueryClient, months: Bucket[], from: Anchor, to: Anchor, limit: number) {
@@ -22,33 +24,31 @@ async function timelineRange(qc: QueryClient, months: Bucket[], from: Anchor, to
 	const i = from.scope ? order.indexOf(from.scope) : -1;
 	const j = to.scope ? order.indexOf(to.scope) : -1;
 	if (i < 0 || j < 0) return null;
-	const items = (k: number) => qc.ensureQueryData(monthQuery(order[k]!));
-	const expand = async (k: number, covers: string[]) => {
-		const groups = new Map((await items(k)).map((it) => [it[0], idsOf(it)]));
-		return covers.flatMap((id) => groups.get(id) ?? [id]);
-	};
-	const ids = async (k: number) => (await items(k)).map((it) => it[0]);
+	const units = async (k: number) => (await effectiveMonthItems(qc, order[k]!)).map((it) => ({ key: it[0], ids: idsOf(it) }));
 	if (i === j) {
-		const covers = sliceBetween(await ids(i), from.id, to.id, limit);
-		return covers && (await expand(i, covers)).slice(0, limit);
+		const u = await units(i);
+		const keys = sliceBetween(u.map((x) => x.key), from.id, to.id, limit);
+		if (!keys) return null;
+		const byKey = new Map(u.map((x) => [x.key, x.ids]));
+		return keys.flatMap((k) => byKey.get(k) ?? [k]).slice(0, limit);
 	}
 
 	const step = i < j ? 1 : -1;
 	const out: string[] = [];
 	for (let k = i; ; k += step) {
-		let list = await ids(k);
-		if (step < 0) list = list.reverse();
+		let u = await units(k);
+		if (step < 0) u = u.reverse();
 		if (k === i) {
-			const a = list.indexOf(from.id);
+			const a = u.findIndex((x) => x.key === from.id);
 			if (a < 0) return null;
-			list = list.slice(a);
+			u = u.slice(a);
 		}
 		if (k === j) {
-			const b = list.indexOf(to.id);
+			const b = u.findIndex((x) => x.key === to.id);
 			if (b < 0) return null;
-			list = list.slice(0, b + 1);
+			u = u.slice(0, b + 1);
 		}
-		out.push(...(await expand(k, list)));
+		out.push(...u.flatMap((x) => x.ids));
 		if (out.length >= limit || k === j) return out.slice(0, limit);
 	}
 }

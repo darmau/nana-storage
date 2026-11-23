@@ -169,6 +169,37 @@ export const DUPLICATE_SCAN_PAGE = 10_000;
 export const DUPLICATE_SCAN_MAX = 200_000;
 
 /**
+ * 相似照片折叠（时间线，src/stacks.ts）：同一天里背景 / 构图相似的一系列照片折叠成一张封面，右下角 +N。
+ * 只用 D1 里已有的指纹（phash + CLIP 向量），不用 Vectorize、不启动容器、没有新的队列或 Cron。
+ * 判定是“双阈值”：phash 汉明距离 ≤ STACK_MAX_HAMMING 而且余弦 ≥ STACK_MIN_COSINE。
+ * 比重复照片（≤4 / ≥0.96）宽松：系列图主体不同、背景相似。两个值要按真实库校准，
+ * 改完后在设置页重新整理一次即可全库生效（补建可重跑）。
+ */
+export const STACK_MAX_HAMMING = 12;
+export const STACK_MIN_COSINE = 0.9;
+/** 每组最多这么多张：超过就不再往里加（防止白底文档 / 截图并成巨型组）。 */
+export const STACK_MAX_MEMBERS = 100;
+/**
+ * 增量（写指纹时顺带分组）的读取上限：当天候选最多 STACK_DAY_MAX 行（窄行，不带向量），
+ * 各组代表 + 未成组单张最多 STACK_LEADER_MAX 个向量。超过任一个就跳过这张的分组（交给补建）。
+ * 最坏每张约 2500 行 D1 读取（约 $0.0025），典型几十到几百行；0 容器费用。
+ */
+export const STACK_DAY_MAX = 2000;
+export const STACK_LEADER_MAX = 500;
+/**
+ * 存量补建：只由用户在设置页点击触发，前端顺序请求（每次一个 chunk，最多 STACK_BACKFILL_REQUESTS 次，出错即停）。
+ * 每个 chunk 最多 STACK_BACKFILL_DAYS 天、累计读 STACK_BACKFILL_ROWS 行照片；超过 STACK_BACKFILL_DAY_MAX 张的天跳过。
+ * 全库一次性成本约每张照片 2 行读取（assets + asset_fp）加少量写入，38 万张约 $1–2 的 D1 费用，0 容器费用。
+ */
+export const STACK_BACKFILL_DAYS = 40;
+export const STACK_BACKFILL_ROWS = 12_000;
+export const STACK_BACKFILL_DAY_MAX = 5000;
+/** 补建的并发锁：一个 chunk 正在跑时拒绝第二个（前端本来就顺序请求，这只是保险）。 */
+export const STACK_BACKFILL_LOCK_MS = 120_000;
+/** 前端一次点击最多连续请求这么多个 chunk（38 万张约几十个 chunk），到上限就停，可以再点继续。 */
+export const STACK_BACKFILL_REQUESTS = 600;
+
+/**
  * 自定义主题：最多 SMART_SET_MAX 个，每个最多 SMART_SET_MAX_EXAMPLES 个样本（正 + 负）。
  * 每个主题是一个逻辑回归分类器（apps/worker/src/smartset-model.ts），分数 p 在 0–1 之间。它只负责建议，
  * 照片放进哪个相册由用户在“结果”里手动挑，所以样本保持小规模。

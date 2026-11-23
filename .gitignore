@@ -7,4 +7,10 @@ dist/
 worker-configuration.d.ts
 .map-data/
 wrangler.test.generated.json
+wrangler.dev.generated.json
 wrangler.deploy.json
+.dev-home/
+.docker-tmp/
+.wrangler-logs/
+.chrome-profile/
+.perf-shots/

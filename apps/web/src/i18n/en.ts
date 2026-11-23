@@ -658,8 +658,7 @@ export const en: Messages = {
 		intro:
 			"Resized, recompressed, converted or slightly cropped copies are listed as duplicates. In each group, the photo to keep is recommended by favorite, Live Photo, RAW, resolution, then file size. Photos from the same burst or taken at different times don't count. Open a group to compare; mark photos that actually differ as “Not duplicates” and they won't come back.",
 		trashed: (n: number) => `Moved ${count(n, "photo", "photos")} to Trash.`,
-		scanned: (groups: number, scanned: number, truncated: boolean) =>
-			`${count(groups, "group", "groups")}, checked ${count(scanned, "photo", "photos")}${truncated ? " (too many photos, only some were checked)" : ""}.`,
+		scanned: (groups: number, scanned: number) => `${count(groups, "group", "groups")}, checked ${count(scanned, "photo", "photos")}.`,
 		none: "No duplicate photos found.",
 		compareKeep: "Compare (recommended to keep)",
 		compare: "Compare",
@@ -787,6 +786,14 @@ export const en: Messages = {
 		heading: (n: number) => `Burst${n ? ` · ${count(n, "photo", "photos")}` : ""}`,
 		empty: "This burst has no photos left.",
 	},
+	stacks: {
+		expand: "Expand similar photos",
+		collapse: "Collapse",
+		count: (n: number) => `Similar photos, ${count(n, "photo", "photos")} in total`,
+		group: (n: number) => `Similar photos · ${count(n, "photo", "photos")}`,
+		dismiss: "Don't stack these",
+		dismissed: "Unstacked. These photos won't be stacked again.",
+	},
 	map: {
 		here: (n: number) => `${count(n, "photo", "photos")} here`,
 		zoomHere: "Zoom in here",
@@ -865,10 +872,25 @@ export const en: Messages = {
 		pages: {
 			processing: "Background processing",
 			guard: "Cost protection",
+			stacks: "Similar photos",
 		},
 		pageHints: {
 			processing: "Progress and failed tasks",
 			guard: "Monthly spending limit, circuit breaker, temporary extra containers",
+			stacks: "Timeline stacking toggle, organize existing photos",
+		},
+		stacks: {
+			foldLabel: "Stack similar photos in the timeline",
+			foldFooter: "Series of photos taken on the same day with similar background and composition show as one cover with +N in the corner; click to expand in place. Applies to this device only; bursts are always stacked.",
+			backfillTitle: "Organize existing photos",
+			backfillFooter: "New photos are grouped automatically when processed. For older photos, click here to organize day by day in batches: database reads and writes only, no containers and no container cost. You can leave midway and continue later.",
+			start: "Start organizing",
+			continue: "Continue",
+			restart: "Organize again",
+			running: "Organizing…",
+			progress: (n: number, day: string) => `${count(n, "photo", "photos")} organized, up to ${day}`,
+			done: (n: number) => `Done. ${count(n, "photo", "photos")} checked.`,
+			stopped: "Paused for now. Click Continue to resume.",
 		},
 		status: {
 			loading: "Loading status…",

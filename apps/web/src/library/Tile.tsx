@@ -1,9 +1,10 @@
 import { useNavigate } from "@tanstack/react-router";
 import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
 import { formatDuration } from "../timeline/format";
+import { anchorStack, collapseStack, expandStack, useTileStackCode } from "../timeline/expand";
 import { KIND_LIVE, KIND_VIDEO, type TimelineItem, thumbUrl } from "../timeline/types";
 import { openContextMenu } from "../ui/ContextMenu";
-import { IconAlert, IconBurst, IconCheck, IconClose, IconHeart, IconLive, IconPlay } from "../ui/icons";
+import { IconAlert, IconBurst, IconCheck, IconChevronUp, IconClose, IconHeart, IconLive, IconPlay } from "../ui/icons";
 import { useAssetMenu } from "./SelectionBar";
 import { useProcessing } from "./processing";
 import { useSelection } from "./selection";
@@ -52,11 +53,14 @@ interface Props {
  * 没有悬停的设备（手机）上，不在多选时勾选框是看不见的，也不能点（pointer-events-none）：
  * 否则点到照片左上角会莫名其妙进入多选。手机上靠长按进入多选。
  * 连拍封面（时间线里）代表整组：点击进入连拍页，选择、右键菜单都作用于整组。
+ * 相似照片封面（右下角 +N）代表整组：点击在原地展开，选择、右键菜单同样作用于整组；
+ * 展开后“收起”按钮挂在展开时的封面（锚点）那张上。
  */
 export const Tile = memo(function Tile({ item, top, left, width, height, scope, onOpen: openOne }: Props) {
-	const [id, , , kind, , duration, favorite, rev, burst] = item;
+	const [id, , , kind, , duration, favorite, rev, burst, stack] = item;
 	const navigate = useNavigate();
-	const onOpen = burst ? (assetId: string) => void navigate({ to: "/bursts/$assetId", params: { assetId } }) : openOne;
+	const stackCode = useTileStackCode(item);
+	const onOpen = burst && !stack ? (assetId: string) => void navigate({ to: "/bursts/$assetId", params: { assetId } }) : openOne;
 	const { selected, active, toggle, extend } = useSelection();
 	const isSelected = selected.has(id);
 	const menu = useAssetMenu();
@@ -97,13 +101,13 @@ export const Tile = memo(function Tile({ item, top, left, width, height, scope, 
 			onContextMenu={(e) => {
 				// 触屏长按是多选，不弹菜单
 				if (lastPointer.current === "touch") return e.preventDefault();
-				openContextMenu(e, menu(id, favorite === 1, onOpen, burst));
+				openContextMenu(e, menu(id, favorite === 1, onOpen, burst, stack));
 			}}
 		>
 			<button
 				type="button"
 				className="block h-full w-full focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
-				aria-label={active ? (isSelected ? t.library.deselect : t.library.select) : t.library.open}
+				aria-label={active ? (isSelected ? t.library.deselect : t.library.select) : stackCode === 1 ? t.stacks.expand : t.library.open}
 				onPointerDown={onPointerDown}
 				onPointerUp={cancelPress}
 				onPointerLeave={cancelPress}
@@ -114,6 +118,7 @@ export const Tile = memo(function Tile({ item, top, left, width, height, scope, 
 					}
 					if (e.shiftKey) extend(id, scope, burst);
 					else if (active || e.metaKey || e.ctrlKey) toggle(id, scope, burst);
+					else if (stackCode === 1) expandStack(stack!, id);
 					else onOpen(id);
 				}}
 			>
@@ -162,11 +167,30 @@ export const Tile = memo(function Tile({ item, top, left, width, height, scope, 
 					{formatDuration(duration)}
 				</span>
 			)}
-			{burst && (
+			{burst && !stack && (
 				<span className="pointer-events-none absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-black/55 py-0.5 pl-1.5 pr-2 text-[11px] font-semibold tabular-nums text-white">
 					<IconBurst size={12} />
 					{burst.length}
 				</span>
+			)}
+			{stackCode === 1 && (
+				<span
+					aria-label={t.stacks.count(burst!.length)}
+					className="pointer-events-none absolute bottom-1.5 right-1.5 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-white"
+				>
+					+{burst!.length - 1}
+				</span>
+			)}
+			{stackCode === 2 && (
+				<button
+					type="button"
+					aria-label={t.stacks.collapse}
+					onClick={() => collapseStack(anchorStack(id)!)}
+					className="absolute right-1.5 top-1.5 flex h-7 items-center gap-1 rounded-full bg-black/55 px-2.5 text-[11px] font-semibold text-white transition hover:bg-black/70"
+				>
+					<IconChevronUp size={12} />
+					{t.stacks.collapse}
+				</button>
 			)}
 			{!burst && kind === KIND_LIVE && (
 				<span

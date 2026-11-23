@@ -8,6 +8,7 @@ import { type MenuItem, openMenuAt } from "../ui/ContextMenu";
 import {
 	IconAlbum,
 	IconArchive,
+	IconBurst,
 	IconCheck,
 	IconClose,
 	IconCompress,
@@ -30,6 +31,7 @@ import {
 	batch,
 	compressOriginals,
 	createSmartSet,
+	dismissStack,
 	downloadZip,
 	invalidateLibrary,
 	removeFromAlbum,
@@ -281,8 +283,8 @@ export function useAssetMenu() {
 	const { selected, toggle } = useSelection();
 	const { context, run, pick, download } = useAssetActions();
 
-	/** group：连拍封面代表的整组，没有选中别的照片时，操作作用于整组。 */
-	return (id: string, favorite: boolean, onOpen: (id: string) => void, group?: string[]): MenuItem[] => {
+	/** group：连拍 / 相似照片封面代表的整组，没有选中别的照片时，操作作用于整组。stackId：相似照片组（多了“不折叠这组”）。 */
+	return (id: string, favorite: boolean, onOpen: (id: string) => void, group?: string[], stackId?: string): MenuItem[] => {
 		const multi = selected.has(id) && selected.size > (group?.length ?? 1);
 		const ids = multi ? [...selected] : (group ?? [id]);
 		const head: MenuItem[] = multi
@@ -291,7 +293,7 @@ export function useAssetMenu() {
 					{ label: t.library.open, icon: <IconPhotos size={18} />, onSelect: () => onOpen(id) },
 					{ label: selected.has(id) ? t.library.deselect : t.library.select, icon: <IconCheck size={18} />, onSelect: () => toggle(id, undefined, group) },
 				];
-		if (group && !multi) head.splice(0, 0, { heading: t.actions.burst(group.length) });
+		if (group && !multi) head.splice(0, 0, { heading: stackId ? t.stacks.group(group.length) : t.actions.burst(group.length) });
 
 		if (context.kind === "smartSet")
 			return [...head, "sep", ...smartSetItems(context, (label) => run(() => setSmartSetExamples(qc, context.setId, ids, label), sampleDone(label)))];
@@ -369,6 +371,12 @@ export function useAssetMenu() {
 			composeItem(ids, pick, true),
 			{ label: multi ? t.actions.download : t.actions.downloadOriginal, icon: <IconDownload size={18} />, onSelect: () => download(ids) },
 		];
+		if (stackId && !multi)
+			items.push({
+				label: t.stacks.dismiss,
+				icon: <IconBurst size={18} />,
+				onSelect: () => void run(() => dismissStack(qc, stackId), t.stacks.dismissed, true),
+			});
 		if (context.kind === "album") {
 			const { albumId } = context;
 			if (!multi && !group)

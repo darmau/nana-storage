@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { bucketsQuery, monthQuery } from "../timeline/queries";
+import { effectiveMonthItems, findEffectiveItem } from "../timeline/effective";
+import { bucketsQuery } from "../timeline/queries";
 import type { Bucket, TimelineItem } from "../timeline/types";
 
 export interface Neighbor {
@@ -50,7 +51,8 @@ export function listNav(
 }
 
 export async function neighbor(qc: QueryClient, id: string, month: string, dir: -1 | 1): Promise<Neighbor | null> {
-	const items = await qc.ensureQueryData(monthQuery(month));
+	// 有效列表：原地展开的相似照片组换成成员，展开的照片也能逐张前后切换
+	const items = await effectiveMonthItems(qc, month);
 	const i = items.findIndex((it) => it[0] === id);
 	const j = i + dir;
 	if (i >= 0 && j >= 0 && j < items.length) return { id: items[j]![0], month, item: items[j]! };
@@ -58,7 +60,7 @@ export async function neighbor(qc: QueryClient, id: string, month: string, dir: 
 	const buckets: Bucket[] = await qc.ensureQueryData(bucketsQuery);
 	let b = buckets.findIndex((x) => x.month === month) + dir;
 	while (b >= 0 && b < buckets.length) {
-		const other = await qc.ensureQueryData(monthQuery(buckets[b]!.month));
+		const other = await effectiveMonthItems(qc, buckets[b]!.month);
 		if (other.length) {
 			const it = dir === 1 ? other[0]! : other[other.length - 1]!;
 			return { id: it[0], month: buckets[b]!.month, item: it };
@@ -69,5 +71,5 @@ export async function neighbor(qc: QueryClient, id: string, month: string, dir: 
 }
 
 export function findItem(qc: QueryClient, id: string, month: string): TimelineItem | undefined {
-	return qc.getQueryData<TimelineItem[]>(monthQuery(month).queryKey)?.find((it) => it[0] === id);
+	return findEffectiveItem(qc, id, month);
 }

@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { COMPRESS_BATCH_MAX, type ComposeDirection } from "@nana/shared";
 import { api } from "../api";
+import { collapseStack } from "../timeline/expand";
 import { armLibrarySync } from "./sync";
 import { watchCompose } from "./processing";
 
@@ -17,8 +18,16 @@ export type BatchAction =
 
 /** 资料库里任何数据变了以后，刷新所有相关列表。 */
 export function invalidateLibrary(qc: QueryClient) {
-	for (const key of ["timeline", "list", "asset", "folders", "albums", "smart-sets", "duplicates", "compress", "people", "storage-summary", "stats"])
+	for (const key of ["timeline", "list", "asset", "folders", "albums", "smart-sets", "duplicates", "compress", "people", "storage-summary", "stats", "stack"])
 		void qc.invalidateQueries({ queryKey: [key] });
+}
+
+/** “不折叠这组”：整组不再参与相似照片分组，收起并刷新。 */
+export async function dismissStack(qc: QueryClient, stackId: string) {
+	await api(`/stacks/${stackId}/dismiss`, { method: "POST", json: {} });
+	collapseStack(stackId);
+	void qc.invalidateQueries({ queryKey: ["stack"] });
+	invalidateLibrary(qc);
 }
 
 export async function batch(qc: QueryClient, ids: string[], action: BatchAction) {

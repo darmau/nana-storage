@@ -25,6 +25,7 @@ import { GuardPage } from "./routes/settings/GuardPage";
 import { ProcessingPage } from "./routes/settings/ProcessingPage";
 import { SettingsLayout } from "./routes/settings/SettingsLayout";
 import { SettingsOverview } from "./routes/settings/SettingsOverview";
+import { StacksPage } from "./routes/settings/StacksPage";
 import { DropUpload, useUploadTarget } from "./upload/DropUpload";
 import { UploadPanel } from "./upload/UploadPanel";
 import { UploadDoneToast } from "./upload/UploadDoneToast";
@@ -300,6 +301,7 @@ const settingsTree = settingsRoute.addChildren([
 	createRoute({ getParentRoute: () => settingsRoute, path: "/", component: SettingsOverview }),
 	createRoute({ getParentRoute: () => settingsRoute, path: "/processing", component: ProcessingPage }),
 	createRoute({ getParentRoute: () => settingsRoute, path: "/guard", component: GuardPage }),
+	createRoute({ getParentRoute: () => settingsRoute, path: "/stacks", component: StacksPage }),
 ]);
 const routeTree = rootRoute.addChildren([
 	createRoute({ getParentRoute: () => rootRoute, path: "/", component: TimelinePage, validateSearch: validateTimelineSearch }),

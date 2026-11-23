@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { BUDGET_WARN_RATIO, type GuardMetric } from "@nana/shared";
 import { api } from "../../api";
 import { fmtNumber, locale, t } from "../../i18n";
-import { IconActivity, IconChevronLeft, IconSettings, IconShield } from "../../ui/icons";
+import { IconActivity, IconBurst, IconChevronLeft, IconSettings, IconShield } from "../../ui/icons";
 import type { ActiveJob } from "../ProcessingStatus";
 
 /** 设置的各个分页：宽屏时是左侧的分页导航，窄屏时是概览页里的列表。 */
@@ -11,6 +11,7 @@ export const SETTINGS_PAGES = [
 	{ to: "/settings", label: t.settings.overview, icon: IconSettings },
 	{ to: "/settings/processing", label: t.settings.pages.processing, icon: IconActivity },
 	{ to: "/settings/guard", label: t.settings.pages.guard, icon: IconShield },
+	{ to: "/settings/stacks", label: t.settings.pages.stacks, icon: IconBurst },
 ] as const;
 
 export const GUARD_LABELS: Record<GuardMetric, { name: string; fmt: (n: number) => string }> = {

@@ -656,8 +656,7 @@ export const zhCN = {
 		intro:
 			"缩小、重新压缩、转换格式或轻微裁剪过的副本会列为重复。每组按收藏、Live Photo、有 RAW、分辨率、文件大小的顺序推荐保留一张；同一组连拍、拍摄时间不同的不算重复。点开一组逐张对比，其实不同的标记为“不是重复”后不再出现。",
 		trashed: (n: number) => `已把 ${n} 张移到回收站。`,
-		scanned: (groups: number, scanned: number, truncated: boolean) =>
-			`${groups} 组，检查了 ${fmtNumber(scanned)} 张照片${truncated ? "（照片太多，只检查了一部分）" : ""}。`,
+		scanned: (groups: number, scanned: number) => `${groups} 组，检查了 ${fmtNumber(scanned)} 张照片。`,
 		none: "没有发现重复的照片。",
 		compareKeep: "对比（推荐保留）",
 		compare: "对比",
@@ -782,6 +781,14 @@ export const zhCN = {
 		heading: (n: number) => `连拍${n ? ` · ${n} 张` : ""}`,
 		empty: "这组连拍已经没有照片了。",
 	},
+	stacks: {
+		expand: "展开相似照片",
+		collapse: "收起",
+		count: (n: number) => `相似照片，共 ${n} 张`,
+		group: (n: number) => `相似照片 · ${n} 张`,
+		dismiss: "不折叠这组",
+		dismissed: "已取消折叠，这组照片以后不再折叠",
+	},
 	map: {
 		here: (n: number) => `这里的 ${n} 张照片`,
 		zoomHere: "放大到这里",
@@ -860,10 +867,25 @@ export const zhCN = {
 		pages: {
 			processing: "后台处理",
 			guard: "成本防护",
+			stacks: "相似照片",
 		},
 		pageHints: {
 			processing: "进度、失败的任务",
 			guard: "月度费用上限、熔断、临时调高容器数",
+			stacks: "时间线折叠开关、整理存量照片",
+		},
+		stacks: {
+			foldLabel: "在时间线折叠相似照片",
+			foldFooter: "同一天里背景、构图相似的一系列照片显示成一张封面，右下角 +N，点击在原地展开。只对这台设备生效；连拍始终折叠。",
+			backfillTitle: "整理存量照片",
+			backfillFooter: "新照片处理完会自动分组。以前的照片点这里按天分批整理：只读写数据库，不启动容器、不产生容器费用。可以中途离开，回来点“继续整理”接着来。",
+			start: "开始整理",
+			continue: "继续整理",
+			restart: "重新整理",
+			running: "正在整理…",
+			progress: (n: number, day: string) => `已整理 ${fmtNumber(n)} 张，到 ${day}`,
+			done: (n: number) => `整理完成，共检查 ${fmtNumber(n)} 张。`,
+			stopped: "这次先到这里，点“继续整理”接着来。",
 		},
 		status: {
 			loading: "正在读取状态…",

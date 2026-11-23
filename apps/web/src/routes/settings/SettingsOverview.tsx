@@ -129,6 +129,7 @@ function Stat({ to, label, value, sub, warn }: { to: "/settings/processing" | "/
 const PAGE_HINTS: Record<string, string> = {
 	"/settings/processing": t.settings.pageHints.processing,
 	"/settings/guard": t.settings.pageHints.guard,
+	"/settings/stacks": t.settings.pageHints.stacks,
 };
 
 /** 窄屏：各分页的入口（宽屏时在左侧导航里）。 */

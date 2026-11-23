@@ -134,7 +134,7 @@ export function DuplicatesPage() {
 				{trash.data !== undefined && <p className="text-sm text-muted">{t.duplicates.trashed(trash.data)}</p>}
 				{data && (
 					<p className="text-sm text-muted">
-						{t.duplicates.scanned(data.total, data.scanned, data.truncated)}
+						{t.duplicates.scanned(data.total, data.scanned)}
 					</p>
 				)}
 				{data?.total === 0 && <p className="py-10 text-center text-sm text-muted">{t.duplicates.none}</p>}

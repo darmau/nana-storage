@@ -102,6 +102,11 @@
 ## 时间线与查看器
 
 - `GET /api/timeline/buckets` 返回每月张数；`GET /api/timeline/month/:ym` 返回一个月的紧凑数组（`src/timeline.ts`）。
+- 相似照片折叠（`src/stacks.ts`，迁移 0037）：同一天里 phash 汉明距离 ≤ `STACK_MAX_HAMMING` 而且 CLIP 余弦 ≥ `STACK_MIN_COSINE` 的一系列照片共用 `assets.stack_id`，时间线折叠成一张封面（收藏优先，否则最早），条目第 10 项是 stack_id，前端右下角显示 `+N`，**点击在原地展开**（不跳转页面）。判定比重复照片（≤4 / ≥0.96）宽松，两个阈值在 shared 的 `limits.ts`，按真实库校准后在设置页重新整理即可全库生效。分组只用 D1 里已有的指纹：不用 Vectorize、不启动容器、没有新的队列或 Cron。
+  - 增量：process 任务写指纹成功后跑 `maybeStack()`，只读当天的候选（`assets_day` 部分索引，写明 `INDEXED BY`）：各组最早的一张当代表 + 未成组的单张，phash 粗筛 + 余弦复核，优先并入已有的组（避免裂组），和代表比而不是链式合并（避免传递性失控）。读取上限 `STACK_DAY_MAX` / `STACK_LEADER_MAX`，超过就跳过这张交给补建；最坏每张约 2500 行 D1 读取，典型几十到几百行。失败只记日志，不让任务失败。
+  - 补建：只由用户在设置 › 相似照片（`/settings/stacks`）点击触发，前端顺序请求（最多 `STACK_BACKFILL_REQUESTS` 次，出错即停），每个 chunk 最多 `STACK_BACKFILL_DAYS` 天 / `STACK_BACKFILL_ROWS` 行，按天整体重新聚类（`clusterDay`），进度记在 `stacks_state`（cursor 按 `local_day` 升序），可断点续跑、可重置重跑。超过 `STACK_BACKFILL_DAY_MAX` 张的天跳过。全库一次性约每张 2 行读取加少量写入，38 万张约 $1–2 的 D1 费用，0 容器费用。
+  - 读取时分区键是 `stack_id || '|' || local_day`（改过时间的成员自动散开，不用维护）；封面、可见性、张数和连拍一样在读取时算，删除 / 归档 / 恢复零维护。`?stacks=0` 不折叠相似照片（连拍照常），开关是这台设备的偏好（`ui/stacks.ts`）。成员接口 `GET /api/stacks/:id/assets?day=`（`assets_stack` 索引，CROSS JOIN，带 ETag）；“不折叠这组”（右键菜单）→ `POST /api/stacks/:id/dismiss`：整组记进 `stack_dismissed`（随条目级联删除），以后增量和补建都跳过。
+  - 前端：展开状态存在查询数据之外（`timeline/expand.ts`，stackId → 锚点封面），月份卸载 / 数据刷新都保持；`MonthSection` 把展开的封面换成成员（`stackQuery` 按需取，拍摄时间倒序），布局重算、月份高度实测（`measureElement`），下方月份自动下移。查看器导航和 Shift 范围选择走“有效列表”（`timeline/effective.ts`）。折叠态选择 / 右键作用于整组，展开后逐张。界面测试：`node scripts/perf/stacks-ui.mjs <截图目录>`（先灌 `seed-50k.sql` + `seed-stacks.sql`）。
 - 前端（`apps/web/src/timeline/`）外层按月虚拟化，月内只渲染视口上下 1200px 内的行。时间线的每个月和文件夹 / 相册等列表（`AssetGrid`）共用 `library/GridWindow.tsx`：渲染范围按 400px 取整（滚动不跨步长不重新渲染），二分查找行，离开范围的格子卸载。DOM 节点数和照片总数无关：5 万张时最多约 1100 个节点、100 个格子。改动布局或虚拟化之后，重跑 `scripts/perf/timeline-perf.mjs`。
 - 右侧拖动条（`timeline/Scrubber.tsx`）：悬停、拖动或刚滚动过时露出半圆手柄。鼠标拖动时页面跟着滚；触屏拖动时只有手柄和月份标签跟着手指，松手才跳过去（iOS 上手指按着时用 `scrollTo` 滚页面，之后触摸事件的坐标会差出刚滚过的距离，页面在顶部和底部之间来回跳、一直是空白占位，不要改回去）。拖动期间时间线一个月份都不挂载、不请求经过的月份，列表容器的 `.scrub-placeholder` 背景（CSS 渐变画的格子）就是占位；松手后才加载停下的位置。快速滚动（`library/scrub.ts`：连续 2 次滚动事件超过每秒 8 个视口高度，降速 180ms 后恢复）同样处理，普通滚轮不会触发。拖动和悬停时不走 React：手柄、细线、月份标签直接改 `transform` 和文字，只在按下 / 松开时渲染；位置一律用 transform，不改 `top`、不对位置做过渡。有拖动条时 `<html>` 带 `has-scrubber`，整个 `<main>`（包括页头按钮）给它让出右侧位置。
 - 列表也有拖动条（`library/ListScrubber.tsx`，至少 100 张、在窗口里滚动时才有；回收站按删除时间排序，没有）。只有相册、文件夹和主题的结果（`LibraryList` 的 `datedScrubber`）带年份刻度和月份标签；主题、人物、收藏、搜索等其余列表只显示手柄（`Scrubber` 的 `dated={false}`），因为主题的顺序不是拍摄时间，按顺序切出来的年份会大量重复。两种拖动条的占位、不走 React 等性能逻辑完全一样。不止一页时，第一页带回整个列表的每月张数（`page()` 的 `withMonths`，多一次聚合查询），没加载的部分按已加载部分每张的平均高度估算；不带日期的拖动条没有每月张数时只覆盖已加载的部分。拖动或快速滚动期间不加载，停下后一页一页补到停下的位置，请求数不超过总页数。
@@ -129,7 +134,7 @@
 ## 连拍与照片类型
 
 - `assets.burst_id`：Apple 的 `BurstUUID`，或者 `groupBurst()`（`src/process.ts`）按拍摄间隔推断的组（`t:` 前缀）。推断条件是同一台相机、同样尺寸、间隔在 (0, 500ms] 以内，所以只有带亚秒时间的照片才会被分组。后处理的照片会把两边已有的推断组合并。
-- 时间线把一组连拍折叠成一张封面（收藏的优先，否则最早的一张），条目的第 9 项是整组的 id。按月张数也按组计算。格子点开进入 `/bursts/:id`（`GET /api/bursts/:id/assets`），选择、右键菜单、按天全选、Shift 范围选择都作用于整组。其他列表（文件夹、相册、搜索）不折叠。
+- 时间线把一组连拍折叠成一张封面（收藏的优先，否则最早的一张），条目的第 9 项是整组的 id。按月张数也按组计算。格子点开进入 `/bursts/:id`（`GET /api/bursts/:id/assets`），选择、右键菜单、按天全选、Shift 范围选择都作用于整组。其他列表（文件夹、相册、搜索）不折叠。相似照片组同样折叠（第 10 项是 stack_id，点击原地展开，见“时间线与查看器”），一个 stack 可以包含多个连拍，成员接口平铺列出。
 - `assets.traits` 位标志（`TRAIT`）：1 全景（全景投影标签，或者相机拍的、长宽比 ≥ 2）、2 长曝光（曝光 ≥ 1 秒）、4 人像（景深图 / 人像遮罩的标签）、8 RAW（有 raw 附件）。都在 process 任务里识别，没有额外的容器调用。搜索页按 `type` 参数筛选。
 - 类型筛选：`ASSET_TYPES`（shared）= 照片 / 视频 / Live Photo（`assets.kind`）+ 连拍 / 全景 / 长曝光 / 人像 / RAW，服务端的条件统一由 `typeCondition()`（`src/library.ts`）生成。文件夹和相册页头下有横向的筛选条（`library/TypeFilter.tsx`，单选，再点一次取消），记在地址的 `?type=` 里（`listSearch`），列表、幻灯片、拖动条都按筛选后的结果；不认识的值当作没有筛选。
 
@@ -161,7 +166,7 @@
 
 - 指纹在 process 任务的那 1 次 derive 里一起算（`apps/processor/lib.mjs`），不增加容器调用：`phash`（64 位感知哈希）和 CLIP ViT-B/32 图像向量（512 个 int8，模型权重在构建镜像时下载，固定版本和校验和，容器仍然断网）。都按用户旋转之前的图像计算，rotate 任务带 `x-fingerprint: skip` 不重算。容器算失败时 `fp` 为 null，不影响任务。换模型时同时改 `MODEL_VER` 和 shared 的 `FP_MODEL_VER`。
 - D1 绑定 BLOB 参数只传 `ArrayBuffer`（`blobOf()`）：线上 D1 会把 `Int8Array` / `Uint8Array` 存成逗号分隔的文本（本地模拟器不会）。修复之前写入的 `embedding` 都是这种文本，读取时兼容（`asInt8()` / `decodeClassifier()`），不需要重算。
-- 指纹只存在 D1 的 `asset_fp` 里，不用 Vectorize（CLIP 向量只用来复核重复照片和训练主题）。“相似照片”（查看器信息面板、整理里的相似照片页）已经去掉（迁移 0031 删掉了 `similar_pairs` 等表和 `asset_fp` 的 `indexed` / `similar_*` 列），不要再加回基于 Vectorize 的照片近邻。
+- 指纹只存在 D1 的 `asset_fp` 里，不用 Vectorize（CLIP 向量用来复核重复照片、训练主题、按天折叠相似照片）。“相似照片”（查看器信息面板、整理里的相似照片页）已经去掉（迁移 0031 删掉了 `similar_pairs` 等表和 `asset_fp` 的 `indexed` / `similar_*` 列），不要再加回基于 Vectorize 的照片近邻。
 - 重复照片（`GET /api/duplicates`）：phash 拆成 5 段（13+13+13+13+12 位）存在 `b0..b4`，距离 ≤ `DUPLICATE_MAX_HAMMING`（4）的一定有一段相同。候选对存在 `duplicate_pairs`（迁移 0016），写指纹时（`saveFingerprint` → `savePairs`）按 5 段索引查近邻（每张最多 `DUPLICATE_NEIGHBOR_MAX` 个）增量维护，只存不会变的条件（哈希距离、照片 / 视频、向量余弦）；打开页面只读候选对，再按连拍、拍摄时间、回收站、“不是重复”过滤后并查集分组，读取量和照片总数无关。部署前的指纹由第一次打开时全量补建一次（`rebuildDuplicatePairs`，最多读 `DUPLICATE_SCAN_MAX` 行，完成后写 `duplicate_pairs_state`；增量维护失败时删掉这一行，下次打开再补）。视频和照片不互比，同一组连拍不算重复。phash 只看 32×32 的明暗，同一场景连拍的几张也会落在距离以内，所以还要：两张都有相机 EXIF 时拍摄时间相差 ≤ `DUPLICATE_SAME_CAPTURE_MS`（整刻钟的差算时区丢失，改过时间的不比），两张都有向量时余弦 ≥ `DUPLICATE_MIN_COSINE`（在写候选对时判断，全量补建时最多读 `DUPLICATE_EMBED_MAX` 张的向量）。
 - “不是重复”：`duplicate_ignores`（a < b 的照片对，随条目级联删除），`POST /api/duplicates/ignore` / `unignore`（`{ ids, pivot? }`，最多 `DUPLICATE_IGNORE_MAX` 张；有 pivot 时只记它和其他每一张）。前端点开一组进入 `routes/DuplicateCompare.tsx`：几张叠在同一位置，←/→ / 数字键 / 滑动切换，点击放大且切换时保持位置，↑/↓ 换组；当前照片下方显示尺寸、大小、格式、拍摄时间、文件名和所在文件夹的路径（`GET /assets/:id` 的 `folder_path`，前 24 张 + 当前这张各请求一次，和查看器共用缓存）。
 - 主题（`smart_sets` / `smart_set_examples` / `smart_set_suggestions`，后端在 `src/similar.ts`，前端 `routes/SmartSetPages.tsx`）：按被摄内容浏览（狗、汽车…）。每个主题是 CLIP 向量上的逻辑回归分类器（`src/smartset-model.ts`，正例、反例加上全库随机抽的 `SMART_SET_BACKGROUND` 张背景，固定步数，权重存在 `smart_sets.weights`），分数 p 在 0–1。**分类器只负责建议**，照片放进哪个相册由用户在“结果”里手动挑，所以样本保持小规模（最多 `SMART_SET_MAX_EXAMPLES` 个）。
