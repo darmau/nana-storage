@@ -90,6 +90,12 @@ export function LivePhotoPage() {
 		if (v && Math.abs(v.currentTime - clamped / 1000) > 0.05) v.currentTime = clamped / 1000;
 	};
 
+	// 回到进来的那个页面（文件夹 / 时间线等），保留原来的路径和筛选。直接打开 /live/…（没有上一条历史）时回首页。
+	const goBack = () => {
+		if (window.history.length > 1) window.history.back();
+		else navigate({ to: "/" });
+	};
+
 	const confirm = async () => {
 		if (!a || saving) return;
 		setSaving(true);
@@ -98,7 +104,7 @@ export function LivePhotoPage() {
 			// 帧的时间严格小于视频时长（最后一毫秒可能抽不到帧）
 			const t = Math.min(Math.max(0, Math.round(atMs)), Math.max(0, durationMs - 1));
 			await convertToLivePhoto(qc, a.id, t);
-			navigate({ to: "/" });
+			goBack();
 		} catch (e) {
 			setError(errorText(e));
 			setSaving(false);
@@ -111,7 +117,7 @@ export function LivePhotoPage() {
 	return (
 		<div role="dialog" aria-modal="true" aria-label={t.livePhoto.title} className="theme-dark fixed inset-0 z-[60] flex flex-col bg-bg text-fg fade-in">
 			<div className="flex shrink-0 items-center justify-between gap-2 pl-[max(0.5rem,var(--safe-left))] pr-[max(0.5rem,var(--safe-right))] pt-[max(0.5rem,var(--safe-top))] pb-2">
-				<button type="button" className={button} onClick={() => navigate({ to: "/" })}>
+				<button type="button" className={button} onClick={goBack}>
 					<IconChevronLeft size={20} />
 					<span>{t.common.cancel}</span>
 				</button>
