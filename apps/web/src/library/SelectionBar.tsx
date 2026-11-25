@@ -321,7 +321,7 @@ export function useAssetMenu() {
 							true,
 						),
 				});
-			return [...items, ...personItems(context, () => void run(() => removeFromPerson(qc, personId, ids)), () => pick("person", ids))];
+			return [...items, ...personItems(context, () => void run(() => removeFromPerson(qc, personId, ids)), () => pick("person", ids), () => pick("folder", ids))];
 		}
 
 		if (context.kind === "compress") {
@@ -469,6 +469,7 @@ export function SelectionBar() {
 					context,
 					() => void run(() => removeFromPerson(qc, context.personId, ids)),
 					() => pick("person", ids),
+					() => pick("folder", ids),
 				).map((it) => (
 					<button key={it.label} className={btn} disabled={busy} onClick={it.onSelect}>
 						{it.icon}
@@ -591,14 +592,16 @@ function smartSetItems(
 	];
 }
 
-/** 人物页里选中照片后的操作：只有“这不是 X”和“这是其他人物”。 */
+/** 人物页里选中照片后的操作：“这不是 X”“这是其他人物”，以及把这些照片移动到别的文件夹。 */
 function personItems(
 	context: Extract<BarContext, { kind: "person" }>,
 	notThisPerson: () => void,
 	otherPerson: () => void,
+	move: () => void,
 ): { label: string; icon: React.ReactNode; onSelect: () => void }[] {
 	return [
 		{ label: t.actions.notThisPerson(context.name), icon: <IconClose size={18} />, onSelect: notThisPerson },
 		{ label: t.actions.otherPerson, icon: <IconPeople size={18} />, onSelect: otherPerson },
+		{ label: t.actions.moveToFolderMenu, icon: <IconFolderMove size={18} />, onSelect: move },
 	];
 }
