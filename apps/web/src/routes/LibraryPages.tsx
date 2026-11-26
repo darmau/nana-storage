@@ -842,6 +842,17 @@ export function FavoritesPage() {
 	);
 }
 
+export function RecentPage() {
+	useDocumentTitle(t.recent.title);
+	return (
+		<div className="space-y-6">
+			<h1 className="page-title pt-1">{t.recent.title}</h1>
+			{/* 按上传时间排序，和拍摄时间无关：不按天分组，拖动条也只有手柄、没有日期 */}
+			<LibraryList source={{ key: ["recent"], path: "/recent/assets" }} context={{ kind: "library" }} groupByDay={false} empty={t.recent.empty} />
+		</div>
+	);
+}
+
 export function ArchivePage() {
 	useDocumentTitle(t.archive.title);
 	const [type, setType] = useTypeFilter();

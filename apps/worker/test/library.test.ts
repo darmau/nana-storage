@@ -297,6 +297,17 @@ describe("favorites, trash and batch", () => {
 		expect((await call("GET", "/timeline/month/2024-05")).json).toHaveLength(2);
 	});
 
+	it("lists recent uploads by created time descending and hides archived", async () => {
+		await seed(1);
+		await seed(2);
+		await seed(3);
+		await env.DB.prepare("UPDATE assets SET created_at = 100 WHERE id = ?").bind(id(1)).run();
+		await env.DB.prepare("UPDATE assets SET created_at = 300 WHERE id = ?").bind(id(2)).run();
+		await env.DB.prepare("UPDATE assets SET created_at = 200 WHERE id = ?").bind(id(3)).run();
+		await call("POST", "/assets/batch", { action: "archive", ids: [id(2)], value: true });
+		expect((await call("GET", "/recent/assets")).json.items.map((i: unknown[]) => i[0])).toEqual([id(3), id(1)]);
+	});
+
 	it("trash hides from the timeline; restore brings it back", async () => {
 		await seed(1);
 		await call("POST", "/assets/batch", { action: "trash", ids: [id(1)] });

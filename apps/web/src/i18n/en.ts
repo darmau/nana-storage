@@ -556,6 +556,10 @@ export const en: Messages = {
 		title: "Favorites",
 		empty: "No favorite photos yet.",
 	},
+	recent: {
+		title: "Recently uploaded",
+		empty: "No uploaded photos yet.",
+	},
 	archive: {
 		title: "Archive",
 		notice: "Archived photos are hidden from Photos, albums and folders (check “Show archived” on an album or folder to see them). They still show in search, the map and People.",

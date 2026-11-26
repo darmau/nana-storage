@@ -33,7 +33,7 @@ const CONDITIONAL: [RegExp, VersionGroup[]][] = [
 	[/^\/api\/(bursts|albums)\/[^/]+\/assets$/, ["library"]],
 	[/^\/api\/stacks\/[^/]+\/assets$/, ["library"]],
 	[/^\/api\/albums(\/[^/]+)?$/, ["library"]],
-	[/^\/api\/(favorites|archive|trash)\/assets$/, ["library"]],
+	[/^\/api\/(favorites|archive|trash|recent)\/assets$/, ["library"]],
 	[/^\/api\/search(\/cameras)?$/, ["library"]],
 	[/^\/api\/stats\/folders$/, ["library"]],
 	[/^\/api\/folders\/[^/]+\/people(\/[^/]+\/assets)?$/, ["library", "people"]],

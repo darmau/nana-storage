@@ -254,6 +254,13 @@ export const IconCalendar = icon(
 		<path d="M16 2v4M8 2v4M3 10h18" />
 	</>,
 );
+/** 最近上传：时钟 */
+export const IconClock = icon(
+	<>
+		<circle cx="12" cy="12" r="9" />
+		<path d="M12 7v5l3 2" />
+	</>,
+);
 export const IconPin = icon(
 	<>
 		<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />

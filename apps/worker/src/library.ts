@@ -570,6 +570,23 @@ library.get("/archive/assets", async (c) => {
 	);
 });
 
+/**
+ * GET /api/recent/assets → 整个资料库按上传时间（created_at）倒序。归档的照片和“照片”时间线一样不在这里。
+ * 走部分索引 assets_recent_upload（迁移 0039）：没有统计信息时 ORDER BY created_at 会顺着 assets_timeline 扫完整个资料库再排序。
+ */
+library.get("/recent/assets", async (c) =>
+	c.json(
+		await page(
+			c.env,
+			`SELECT ${ITEM_COLUMNS} FROM assets a INDEXED BY assets_recent_upload
+			 WHERE deleted_at IS NULL AND status = 'ready' AND archived = 0
+			 ORDER BY a.created_at DESC, a.id DESC`,
+			[],
+			offsetOf(c.req.query("offset")),
+		),
+	),
+);
+
 library.get("/trash/assets", async (c) =>
 	c.json(
 		await page(

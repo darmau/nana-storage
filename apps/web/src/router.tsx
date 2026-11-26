@@ -11,7 +11,7 @@ import { GuardBanner } from "./routes/GuardBanner";
 import { BurstPage } from "./routes/BurstPage";
 import { LibraryHome } from "./routes/LibraryHome";
 import { exploreSearch, SearchBox, SearchPage } from "./routes/SearchPage";
-import { AlbumPage, AlbumsPage, ArchivePage, FavoritesPage, FoldersPage, TrashPage } from "./routes/LibraryPages";
+import { AlbumPage, AlbumsPage, ArchivePage, FavoritesPage, FoldersPage, RecentPage, TrashPage } from "./routes/LibraryPages";
 import { StatsPage } from "./routes/StatsPage";
 import { PeoplePage, PersonPage } from "./routes/PeoplePages";
 import { CompressPage, OrganizePage, QualityPage } from "./routes/OrganizePages";
@@ -38,6 +38,7 @@ import {
 	IconArchive,
 	IconChart,
 	IconChevronRight,
+	IconClock,
 	IconCompass,
 	IconFolder,
 	IconHeart,
@@ -58,7 +59,7 @@ import {
  * 资料库下的页面：移动端底部的“资料库”标签在这些页面上都算选中（相册、文件夹有自己的标签）。
  * 整理（重复照片、相似照片、原图压缩）在移动端没有自己的标签，入口平铺在资料库首页，所以也算在这里。
  */
-const LIBRARY_PATHS = ["/library", "/favorites", "/archive", "/trash", "/organize", "/duplicates", "/compress", "/quality"];
+const LIBRARY_PATHS = ["/library", "/recent", "/favorites", "/archive", "/trash", "/organize", "/duplicates", "/compress", "/quality"];
 /** 探索下的页面：移动端底部的“探索”标签在这些页面上也算选中（地图在移动端从探索页进入） */
 const EXPLORE_PATHS = ["/search", "/people", "/smart-sets", "/map", "/stats"];
 const under = (pathname: string, p: string) => pathname === p || pathname.startsWith(`${p}/`);
@@ -147,6 +148,9 @@ function Layout() {
 				<SideLink to="/favorites" icon={<IconHeart />}>
 					{t.favorites.title}
 				</SideLink>
+				<SideLink to="/recent" icon={<IconClock />}>
+					{t.recent.title}
+				</SideLink>
 				<SideLink to="/archive" icon={<IconArchive />}>
 					{t.archive.title}
 				</SideLink>
@@ -222,7 +226,7 @@ function SideLink({
 	forceActive,
 	children,
 }: {
-	to: "/" | "/map" | "/stats" | "/people" | "/smart-sets" | "/albums" | "/favorites" | "/archive" | "/organize" | "/trash";
+	to: "/" | "/map" | "/stats" | "/people" | "/smart-sets" | "/albums" | "/favorites" | "/recent" | "/archive" | "/organize" | "/trash";
 	icon: React.ReactNode;
 	exact?: boolean;
 	forceActive?: boolean;
@@ -314,6 +318,7 @@ const routeTree = rootRoute.addChildren([
 	createRoute({ getParentRoute: () => rootRoute, path: "/stats", component: StatsPage }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/bursts/$assetId", component: BurstPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/favorites", component: FavoritesPage, validateSearch: viewerSearch }),
+	createRoute({ getParentRoute: () => rootRoute, path: "/recent", component: RecentPage, validateSearch: viewerSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/people", component: PeoplePage }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/people/$personId", component: PersonPage, validateSearch: listSearch }),
 	createRoute({ getParentRoute: () => rootRoute, path: "/smart-sets", component: SmartSetsPage }),

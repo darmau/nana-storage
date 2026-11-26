@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { t } from "../i18n";
 import { StorageMeter } from "../library/StorageMeter";
-import { IconArchive, IconHeart, IconTrash } from "../ui/icons";
+import { IconArchive, IconClock, IconHeart, IconTrash } from "../ui/icons";
 import { useDocumentTitle } from "../ui/title";
 import { ORGANIZE_ITEMS, OrganizeLink } from "./OrganizePages";
 
@@ -18,6 +18,10 @@ export function LibraryHome() {
 		<div className="space-y-7">
 			<h1 className="page-title pt-1">{t.nav.library}</h1>
 			<div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+				<Link to="/recent" className={quick}>
+					<IconClock className="text-accent" />
+					{t.recent.title}
+				</Link>
 				<Link to="/favorites" className={quick}>
 					<IconHeart className="text-[#c0392b] dark:text-[#f28b82]" />
 					{t.favorites.title}

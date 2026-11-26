@@ -164,6 +164,7 @@ for (const stats of [false, true]) describe(`list query plans ${stats ? "with sk
 		["folder sorted by upload time", "/folders/QPFOLDER00000000000000000A/assets?sort=uploaded&order=asc", /assets_folder_visible/],
 		["folder sorted by taken, ascending", "/folders/QPFOLDER00000000000000000A/assets?sort=taken&order=asc", /assets_folder_visible/],
 		["favorites", "/favorites/assets", /assets_favorite_visible/],
+		["recent uploads", "/recent/assets", /assets_recent_upload/],
 		["archive", "/archive/assets", /assets_archived_visible/],
 		["archive filtered by type", "/archive/assets?type=burst", /assets_archived_visible/],
 		["burst", `/bursts/${ID(1)}/assets`, /assets_burst/],
