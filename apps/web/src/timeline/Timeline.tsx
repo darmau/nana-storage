@@ -12,6 +12,7 @@ import { Scrubber } from "./Scrubber";
 import { type Bucket, idsOf } from "./types";
 import { useWidth } from "./useWidth";
 import { t } from "../i18n";
+import { useGridStyle } from "../ui/gridStyle";
 import { TimelineSkeleton } from "../ui/Skeleton";
 
 /**
@@ -64,7 +65,8 @@ export function Timeline({ onOpen }: { onOpen: (id: string, month: string) => vo
 	const { data: months = [], isLoading, error } = useQuery(bucketsQuery);
 	const listRef = useRef<HTMLDivElement>(null);
 	const width = useWidth(listRef);
-	const cfg = useMemo(() => layoutConfig(width), [width]);
+	const gridStyle = useGridStyle();
+	const cfg = useMemo(() => layoutConfig(width, gridStyle), [width, gridStyle]);
 
 	const qc = useQueryClient();
 	const { setRange } = useSelection();

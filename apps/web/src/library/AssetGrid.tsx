@@ -7,6 +7,7 @@ import { ListScrubber } from "./ListScrubber";
 import { useScrollRoot } from "./scrollRoot";
 import { useScrubbing } from "./scrub";
 import { sliceBetween, useSelection } from "./selection";
+import { useGridStyle } from "../ui/gridStyle";
 
 /**
  * 列表网格（文件夹/相册/收藏/回收站/搜索）：已加载的条目一起做 justified 布局，
@@ -65,7 +66,8 @@ export function AssetGrid({
 }) {
 	const ref = useRef<HTMLDivElement>(null);
 	const width = useWidth(ref);
-	const cfg = useMemo(() => ({ ...layoutConfig(width), monthHeaderHeight: 0, dayHeaderHeight: groupByDay ? 32 : 0 }), [width, groupByDay]);
+	const gridStyle = useGridStyle();
+	const cfg = useMemo(() => ({ ...layoutConfig(width, gridStyle), monthHeaderHeight: 0, dayHeaderHeight: groupByDay ? 32 : 0 }), [width, gridStyle, groupByDay]);
 	const layout = useMemo(() => {
 		if (!width) return null;
 		// 不按天分组时，把所有条目当作同一天

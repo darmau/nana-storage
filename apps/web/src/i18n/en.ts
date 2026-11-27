@@ -934,6 +934,11 @@ export const en: Messages = {
 			light: "Light",
 			dark: "Dark",
 		},
+		grid: {
+			title: "Library",
+			squareLabel: "Square 3-column grid on phones",
+			footer: "Default, like the iOS Photos app: three square thumbnails per row, center-cropped. Turn off for justified rows (equal row height, widths stretched to aspect ratio). Applies to this device only; tablets and desktop are always justified.",
+		},
 		language: {
 			title: "Language",
 			system: "System",

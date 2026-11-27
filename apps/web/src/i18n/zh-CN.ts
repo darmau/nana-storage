@@ -929,6 +929,11 @@ export const zhCN = {
 			light: "浅色",
 			dark: "深色",
 		},
+		grid: {
+			title: "资料库",
+			squareLabel: "手机上用方形 3 列网格",
+			footer: "默认和 iOS 相册一样：一行 3 张正方形缩略图，居中裁切。关掉后回到自适应比例（每行等高、宽度按比例拉伸）。只对这台设备生效；平板和桌面始终是自适应。",
+		},
 		language: {
 			title: "语言",
 			system: "跟随系统",

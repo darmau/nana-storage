@@ -7,6 +7,7 @@ import { useGuard } from "../../guard";
 import { fmtNumber, getLocalePref, locale, LOCALE_NAMES, LOCALES, type LocalePref, setLocalePref, t } from "../../i18n";
 import { IconChevronRight, IconLogout, IconMonitor, IconMoon, IconSun } from "../../ui/icons";
 import { getThemePref, setThemePref, type ThemePref } from "../../ui/theme";
+import { setGridStyle, useGridStyle } from "../../ui/gridStyle";
 import { GUARD_LABELS, Group, SETTINGS_PAGES, SettingsHeader, shortDateTime, useFailedJobs } from "./shared";
 
 interface Overview {
@@ -39,6 +40,7 @@ export function SettingsOverview() {
 			<StatusPanel />
 			<PageList />
 			<Appearance />
+			<LibraryGrid />
 			<Language />
 			<Account />
 			<About />
@@ -184,6 +186,24 @@ function Appearance() {
 					</button>
 				))}
 			</div>
+		</Group>
+	);
+}
+
+/** 手机上照片网格的样式：方形 3 列（默认）还是自适应比例。只对这台设备生效。 */
+function LibraryGrid() {
+	const style = useGridStyle();
+	return (
+		<Group title={t.settings.grid.title} footer={t.settings.grid.footer}>
+			<label className="flex min-h-12 cursor-pointer items-center gap-3 px-4 py-2 text-sm">
+				<input
+					type="checkbox"
+					className="h-4 w-4 accent-accent"
+					checked={style === "square"}
+					onChange={(e) => setGridStyle(e.target.checked ? "square" : "justified")}
+				/>
+				<span className="flex-1">{t.settings.grid.squareLabel}</span>
+			</label>
 		</Group>
 	);
 }
