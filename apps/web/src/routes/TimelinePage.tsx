@@ -6,7 +6,7 @@ import { AssetActionsProvider, SelectionBar } from "../library/SelectionBar";
 import { SelectionProvider } from "../library/selection";
 import { Timeline } from "../timeline/Timeline";
 import { timelineNav } from "../viewer/sequence";
-import { Viewer } from "../viewer/Viewer";
+import { ViewerLoader } from "../viewer/ViewerLoader";
 import { useDocumentTitle } from "../ui/title";
 
 const LIBRARY = { kind: "library" } as const;
@@ -55,7 +55,7 @@ export function TimelinePage() {
 				<Timeline onOpen={open} />
 				<SelectionBar />
 				{search.a && search.m && (
-					<Viewer id={search.a} nav={timelineNav(qc, search.a, search.m)} onNavigate={move} onClose={close} />
+					<ViewerLoader id={search.a} nav={timelineNav(qc, search.a, search.m)} onNavigate={move} onClose={close} />
 				)}
 			</AssetActionsProvider>
 		</SelectionProvider>

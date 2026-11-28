@@ -46,6 +46,7 @@ import {
 	rotateFaceBox,
 	videoSources,
 } from "./media";
+import { isImageReady, markImageReady, preloadImage } from "./imageCache";
 import type { Neighbor, ViewerNav } from "./sequence";
 import type { AssetDetail } from "./types";
 
@@ -65,7 +66,7 @@ import type { AssetDetail } from "./types";
  *  - 动效：打开时淡入并放大，关闭时淡出；滑动时照片跟手，松手后滑出，新照片从对应一侧滑入；下滑时背景随之变淡。
  *    系统要求减少动态效果时不做动画，也不等待。
  */
-interface Props {
+export interface ViewerProps {
 	id: string;
 	nav: ViewerNav;
 	onNavigate: (n: Neighbor) => void;
@@ -80,42 +81,9 @@ interface Props {
 
 const CLOSE_MS = 170;
 const SWIPE_OUT_MS = 160;
-/** 正在预加载的图片：留着引用免得请求中途被回收，同一个地址不重复请求 */
-const preloading = new Map<string, HTMLImageElement>();
-/**
- * 已经下载并解码过的预览地址。切换到这些照片时直接显示预览，不再先闪一下模糊的缩略图。
- * 最近几张的 Image 对象留着引用，浏览器更可能保留解码好的位图；只留几张，3840 的预览解码后每张几十 MB。
- */
-const ready = new Map<string, HTMLImageElement | null>();
-const READY_MAX = 200;
-const DECODED_KEEP = 4;
-function markReady(url: string, img: HTMLImageElement | null) {
-	ready.delete(url);
-	ready.set(url, img);
-	let held = 0;
-	for (const [u, el] of [...ready].reverse()) {
-		if (el && ++held > DECODED_KEEP) ready.set(u, null);
-	}
-	while (ready.size > READY_MAX) ready.delete(ready.keys().next().value!);
-}
-function preloadImage(url: string) {
-	if (preloading.has(url) || ready.has(url)) return;
-	const img = new Image();
-	img.decoding = "async";
-	preloading.set(url, img);
-	img.src = url;
-	// decode() 等下载完再在后台解码，切换过去时不用在主线程上现解一张大图
-	img.decode().then(
-		() => {
-			preloading.delete(url);
-			markReady(url, img);
-		},
-		() => preloading.delete(url),
-	);
-}
 const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-export function Viewer({ id, nav, onNavigate, onClose, context = "library", personId, slideshowSource }: Props) {
+export function Viewer({ id, nav, onNavigate, onClose, context = "library", personId, slideshowSource }: ViewerProps) {
 	const qc = useQueryClient();
 	const navTo = useNavigate();
 	const item = nav.item;
@@ -430,7 +398,7 @@ export function Viewer({ id, nav, onNavigate, onClose, context = "library", pers
 									detail.data ? (
 										<VideoPlayer key={id} asset={detail.data} poster={previewUrl(id, rev)} />
 									) : (
-										<img src={previewUrl(id, rev)} alt="" className="max-h-full max-w-full object-contain" />
+										<img src={previewUrl(id, rev)} alt="" fetchPriority="high" className="max-h-full max-w-full object-contain" />
 									)
 								) : edit.pending ? (
 									<div className="relative flex h-full w-full items-center justify-center">
@@ -753,7 +721,7 @@ function Still({
 	const suffix = bust ? `&b=${bust}` : "";
 	const src = previewUrl(id, rev) + suffix;
 	// 挂载时预览已经就绪：一开始就不画缩略图
-	const [instant] = useState(() => ready.has(src));
+	const [instant] = useState(() => isImageReady(src));
 	const [loaded, setLoaded] = useState(instant);
 	const [playing, setPlaying] = useState(false);
 	const videoRef = useRef<HTMLVideoElement>(null);
@@ -821,9 +789,10 @@ function Still({
 				alt=""
 				// 已经解码过的预览同步绘制，不留一帧空白
 				decoding={instant ? "sync" : "async"}
+				fetchPriority="high"
 				onLoad={(e) => {
 					setLoaded(true);
-					markReady(src, e.currentTarget);
+					markImageReady(src, e.currentTarget);
 				}}
 				className="relative max-h-full max-w-full object-contain"
 				draggable={false}
@@ -1037,6 +1006,7 @@ function OriginalOverlay({
 					src={src}
 					alt=""
 					decoding="async"
+					fetchPriority={force ? "high" : "low"}
 					draggable={false}
 					onLoad={(e) => {
 						const img = e.currentTarget;

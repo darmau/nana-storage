@@ -8,25 +8,12 @@ import { PullToRefresh } from "./ui/PullToRefresh";
 import { hideSplash } from "./ui/splash";
 import { ConnectionBanner } from "./routes/ConnectionBanner";
 import { GuardBanner } from "./routes/GuardBanner";
-import { BurstPage } from "./routes/BurstPage";
-import { LibraryHome } from "./routes/LibraryHome";
-import { exploreSearch, SearchBox, SearchPage } from "./routes/SearchPage";
-import { AlbumPage, AlbumsPage, ArchivePage, FavoritesPage, FoldersPage, RecentPage, TrashPage } from "./routes/LibraryPages";
-import { StatsPage } from "./routes/StatsPage";
-import { PeoplePage, PersonPage } from "./routes/PeoplePages";
-import { CompressPage, OrganizePage, QualityPage } from "./routes/OrganizePages";
-import { DuplicatesPage } from "./routes/DuplicatesPage";
-import { LivePhotoPage } from "./routes/LivePhotoPage";
-import { SmartSetPage, SmartSetsPage, validateSmartSetSearch } from "./routes/SmartSetPages";
+import { exploreSearch, SearchBox } from "./routes/SearchBox";
+import { validateSmartSetSearch } from "./routes/smartSetSearch";
 import { TimelinePage, validateTimelineSearch } from "./routes/TimelinePage";
 import { FoldersNav } from "./library/FoldersNav";
 import { StorageMeter } from "./library/StorageMeter";
 import { folderSearch, listSearch } from "./library/TypeFilter";
-import { GuardPage } from "./routes/settings/GuardPage";
-import { ProcessingPage } from "./routes/settings/ProcessingPage";
-import { SettingsLayout } from "./routes/settings/SettingsLayout";
-import { SettingsOverview } from "./routes/settings/SettingsOverview";
-import { StacksPage } from "./routes/settings/StacksPage";
 import { DropUpload, useUploadTarget } from "./upload/DropUpload";
 import { UploadPanel } from "./upload/UploadPanel";
 import { UploadDoneToast } from "./upload/UploadDoneToast";
@@ -54,6 +41,33 @@ import {
 	IconTrash,
 	IconUpload,
 } from "./ui/icons";
+
+// 首页只保留时间线；其余路由首次进入时加载，避免设置、整理、人物等代码阻塞首屏。
+const BurstPage = lazy(() => import("./routes/BurstPage").then((m) => ({ default: m.BurstPage })));
+const LibraryHome = lazy(() => import("./routes/LibraryHome").then((m) => ({ default: m.LibraryHome })));
+const SearchPage = lazy(() => import("./routes/SearchPage").then((m) => ({ default: m.SearchPage })));
+const AlbumPage = lazy(() => import("./routes/LibraryPages").then((m) => ({ default: m.AlbumPage })));
+const AlbumsPage = lazy(() => import("./routes/LibraryPages").then((m) => ({ default: m.AlbumsPage })));
+const ArchivePage = lazy(() => import("./routes/LibraryPages").then((m) => ({ default: m.ArchivePage })));
+const FavoritesPage = lazy(() => import("./routes/LibraryPages").then((m) => ({ default: m.FavoritesPage })));
+const FoldersPage = lazy(() => import("./routes/LibraryPages").then((m) => ({ default: m.FoldersPage })));
+const RecentPage = lazy(() => import("./routes/LibraryPages").then((m) => ({ default: m.RecentPage })));
+const TrashPage = lazy(() => import("./routes/LibraryPages").then((m) => ({ default: m.TrashPage })));
+const StatsPage = lazy(() => import("./routes/StatsPage").then((m) => ({ default: m.StatsPage })));
+const PeoplePage = lazy(() => import("./routes/PeoplePages").then((m) => ({ default: m.PeoplePage })));
+const PersonPage = lazy(() => import("./routes/PeoplePages").then((m) => ({ default: m.PersonPage })));
+const CompressPage = lazy(() => import("./routes/OrganizePages").then((m) => ({ default: m.CompressPage })));
+const OrganizePage = lazy(() => import("./routes/OrganizePages").then((m) => ({ default: m.OrganizePage })));
+const QualityPage = lazy(() => import("./routes/OrganizePages").then((m) => ({ default: m.QualityPage })));
+const DuplicatesPage = lazy(() => import("./routes/DuplicatesPage").then((m) => ({ default: m.DuplicatesPage })));
+const LivePhotoPage = lazy(() => import("./routes/LivePhotoPage").then((m) => ({ default: m.LivePhotoPage })));
+const SmartSetPage = lazy(() => import("./routes/SmartSetPages").then((m) => ({ default: m.SmartSetPage })));
+const SmartSetsPage = lazy(() => import("./routes/SmartSetPages").then((m) => ({ default: m.SmartSetsPage })));
+const GuardPage = lazy(() => import("./routes/settings/GuardPage").then((m) => ({ default: m.GuardPage })));
+const ProcessingPage = lazy(() => import("./routes/settings/ProcessingPage").then((m) => ({ default: m.ProcessingPage })));
+const SettingsLayout = lazy(() => import("./routes/settings/SettingsLayout").then((m) => ({ default: m.SettingsLayout })));
+const SettingsOverview = lazy(() => import("./routes/settings/SettingsOverview").then((m) => ({ default: m.SettingsOverview })));
+const StacksPage = lazy(() => import("./routes/settings/StacksPage").then((m) => ({ default: m.StacksPage })));
 
 /**
  * 资料库下的页面：移动端底部的“资料库”标签在这些页面上都算选中（相册、文件夹有自己的标签）。
@@ -188,7 +202,9 @@ function Layout() {
 			</nav>
 
 			<main className="px-2 pb-[calc(var(--tabbar-h)+1.5rem)] pt-3 sm:px-4 md:pb-[max(2.5rem,var(--safe-bottom))] md:pl-[calc(var(--sidebar-w)+0.5rem)] md:pr-[max(1.5rem,var(--safe-right))]">
-				<Outlet />
+				<Suspense fallback={null}>
+					<Outlet />
+				</Suspense>
 			</main>
 
 			<nav

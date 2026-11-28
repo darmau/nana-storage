@@ -2,8 +2,10 @@ import { useNavigate } from "@tanstack/react-router";
 import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
 import { formatDuration } from "../timeline/format";
 import { anchorStack, collapseStack, expandStack, useTileStackCode } from "../timeline/expand";
-import { KIND_LIVE, KIND_VIDEO, type TimelineItem, thumbUrl } from "../timeline/types";
+import { KIND_LIVE, KIND_VIDEO, previewUrl, type TimelineItem, thumbUrl } from "../timeline/types";
 import { openContextMenu } from "../ui/ContextMenu";
+import { preloadImage } from "../viewer/imageCache";
+import { preloadViewer } from "../viewer/ViewerLoader";
 import { IconAlert, IconBurst, IconCheck, IconChevronUp, IconClose, IconHeart, IconLive, IconPlay } from "../ui/icons";
 import { useAssetMenu } from "./SelectionBar";
 import { useProcessing } from "./processing";
@@ -82,14 +84,40 @@ export const Tile = memo(function Tile({ item, top, left, width, height, scope, 
 	const src = attempt ? `${thumbUrl(id, rev)}&retry=1` : thumbUrl(id, rev);
 
 	const press = useRef<{ timer: ReturnType<typeof setTimeout>; fired: boolean } | null>(null);
+	const warmup = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const lastPointer = useRef("mouse");
+	const cancelWarmup = () => {
+		if (warmup.current) clearTimeout(warmup.current);
+		warmup.current = null;
+	};
+	useEffect(() => cancelWarmup, []);
+	const warmViewer = () => {
+		// 连拍封面去连拍页、相似照片封面原地展开，多选时也不下载大预览。
+		if (active || stackCode === 1 || (burst && !stack)) return;
+		preloadViewer();
+		preloadImage(previewUrl(id, rev));
+	};
+	const onPointerEnter = (e: React.PointerEvent) => {
+		if (e.pointerType !== "mouse") return;
+		cancelWarmup();
+		// 鼠标只是扫过格子时不触发；短暂停留才提前加载。
+		warmup.current = setTimeout(warmViewer, 120);
+	};
 	const onPointerDown = (e: React.PointerEvent) => {
 		lastPointer.current = e.pointerType;
-		if (e.pointerType !== "touch") return;
+		if (e.pointerType !== "touch") {
+			cancelWarmup();
+			warmViewer();
+			return;
+		}
 		const p = { fired: false, timer: setTimeout(() => ((p.fired = true), toggle(id, scope, burst), navigator.vibrate?.(10)), 450) };
 		press.current = p;
 	};
 	const cancelPress = () => press.current && clearTimeout(press.current.timer);
+	const onPointerLeave = () => {
+		cancelPress();
+		cancelWarmup();
+	};
 
 	return (
 		<div
@@ -108,9 +136,11 @@ export const Tile = memo(function Tile({ item, top, left, width, height, scope, 
 				type="button"
 				className="block h-full w-full focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
 				aria-label={active ? (isSelected ? t.library.deselect : t.library.select) : stackCode === 1 ? t.stacks.expand : t.library.open}
+				onPointerEnter={onPointerEnter}
 				onPointerDown={onPointerDown}
 				onPointerUp={cancelPress}
-				onPointerLeave={cancelPress}
+				onPointerLeave={onPointerLeave}
+				onFocus={(e) => e.currentTarget.matches(":focus-visible") && warmViewer()}
 				onClick={(e) => {
 					if (press.current?.fired) {
 						press.current = null;

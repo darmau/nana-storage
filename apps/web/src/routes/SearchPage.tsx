@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearch } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import { ASSET_TYPES, type AssetType } from "@nana/shared";
 import { t } from "../i18n";
 import { api } from "../api";
@@ -8,9 +8,10 @@ import { LibraryList } from "../library/LibraryList";
 import { smartSetsQuery } from "../library/queries";
 import { ASSET_TYPE_LABELS } from "../library/TypeFilter";
 import { FaceAvatar, peopleQuery, personName } from "../people/model";
-import { IconChart, IconChevronRight, IconClose, IconHeart, IconMap, IconSearch, IconSimilar } from "../ui/icons";
+import { IconChart, IconChevronRight, IconHeart, IconMap, IconSimilar } from "../ui/icons";
 import { useDocumentTitle } from "../ui/title";
 import { Cover } from "./LibraryPages";
+import { SearchBox } from "./SearchBox";
 import { smartSetLine } from "./SmartSetPages";
 
 const field = "h-9 rounded-full border border-border bg-card px-3 text-sm font-medium text-fg";
@@ -20,71 +21,6 @@ const PHOTO_TYPES = (["burst", "panorama", "long-exposure", "portrait", "raw"] a
 /** 媒体类型走 /api/search 的 kind 参数，照片类型带 "t:" 前缀走 type 参数（和下拉框的值一致） */
 const MEDIA_KINDS = new Set<AssetType>(["photo", "video", "live"]);
 const kindValue = (type: AssetType) => (MEDIA_KINDS.has(type) ? type : `t:${type}`);
-
-/** 探索页的地址参数：搜索词（?q=，顶栏的搜索框也写这里）和查看器打开的照片（?a=） */
-export const exploreSearch = (s: Record<string, unknown>): { a?: string; q?: string } => ({
-	a: typeof s.a === "string" && /^[0-9A-Z]{26}$/.test(s.a) ? s.a : undefined,
-	q: typeof s.q === "string" && s.q ? s.q.slice(0, 200) : undefined,
-});
-
-/**
- * 搜索词：顶栏（桌面）和探索页（手机）的输入框共用，都写进 /search 的 ?q=。在别的页面输入会跳到探索页，
- * 在探索页上输入只替换地址，不多出历史记录。输入框自己保存正在输入的值，地址被外部改掉（后退、离开探索页）时才跟着变。
- */
-export function useSearchInput(): [string, (value: string) => void] {
-	const onExplore = useRouterState({ select: (s) => s.location.pathname === "/search" });
-	const { q } = useSearch({ strict: false }) as { q?: string };
-	const navigate = useNavigate();
-	const urlQ = onExplore ? (q ?? "") : "";
-	const [value, setValue] = useState(urlQ);
-	const typed = useRef(urlQ);
-	useEffect(() => {
-		if (urlQ === typed.current) return;
-		typed.current = urlQ;
-		setValue(urlQ);
-	}, [urlQ]);
-	const change = useCallback(
-		(v: string) => {
-			setValue(v);
-			typed.current = v;
-			void navigate({
-				to: "/search",
-				search: (prev: Record<string, unknown>) => ({ ...(onExplore ? prev : {}), q: v || undefined, a: undefined }),
-				replace: onExplore,
-			});
-		},
-		[navigate, onExplore],
-	);
-	return [value, change];
-}
-
-/** 搜索框本体：顶栏和探索页（只在手机上显示）共用 */
-export function SearchBox({ className = "", autoFocus }: { className?: string; autoFocus?: boolean }) {
-	const [value, setValue] = useSearchInput();
-	return (
-		<label
-			className={`flex items-center gap-3 rounded-full border border-transparent bg-surface px-4 transition focus-within:border-border focus-within:bg-card focus-within:shadow-[0_2px_12px_rgb(0_0_0/0.08)] ${className}`}
-		>
-			<IconSearch className="shrink-0 text-fg" />
-			<input
-				type="search"
-				autoFocus={autoFocus}
-				className="h-full min-w-0 flex-1 bg-transparent text-base text-fg outline-none placeholder:text-muted focus-visible:outline-none md:text-sm [&::-webkit-search-cancel-button]:hidden"
-				placeholder={t.nav.searchHint}
-				aria-label={t.search.placeholder}
-				value={value}
-				onChange={(e) => setValue(e.target.value)}
-				onKeyDown={(e) => e.key === "Escape" && value && setValue("")}
-				maxLength={200}
-			/>
-			{value && (
-				<button type="button" className="-mr-2 flex h-9 w-9 items-center justify-center rounded-full text-muted hover:bg-surface-2" aria-label={t.search.clear} onClick={() => setValue("")}>
-					<IconClose size={18} />
-				</button>
-			)}
-		</label>
-	);
-}
 
 /**
  * 探索：没有搜索词、没有筛选时是入口页（人物、主题、地图、按类型）；

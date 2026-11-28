@@ -18,7 +18,23 @@ function commit() {
 export default defineConfig({
 	plugins: [react(), tailwindcss()],
 	define: { __APP_BUILD__: JSON.stringify({ commit: commit(), builtAt: new Date().toISOString() }) },
-	build: { outDir: "dist", sourcemap: false, assetsInlineLimit: 0 },
+	build: {
+		outDir: "dist",
+		sourcemap: false,
+		assetsInlineLimit: 0,
+		rolldownOptions: {
+			output: {
+				codeSplitting: {
+					// 只合并首屏静态依赖；动态路由和地图仍然按需加载。避免大量小共享块增加请求数。
+					groups: [
+						{ name: "react", tags: ["$initial"], test: /node_modules[\/](?:react|react-dom|scheduler)[\/]/ },
+						{ name: "vendor", tags: ["$initial"], test: /node_modules/ },
+						{ name: "app", tags: ["$initial"] },
+					],
+				},
+			},
+		},
+	},
 	server: { proxy: { "/api": { target: "http://localhost:8787" } } },
 	worker: { format: "es" },
 });

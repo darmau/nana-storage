@@ -4,7 +4,7 @@ import { errorText } from "../api";
 import { useCallback, useMemo, useRef } from "react";
 import type { TimelineItem } from "../timeline/types";
 import { listNav } from "../viewer/sequence";
-import { Viewer } from "../viewer/Viewer";
+import { ViewerLoader } from "../viewer/ViewerLoader";
 import { AssetGrid } from "./AssetGrid";
 import { AssetRows } from "./AssetRows";
 import { type ListSource, listQuery, sampleConflict } from "./queries";
@@ -125,7 +125,7 @@ export function LibraryList({
 				)}
 				<SelectionBar />
 				{search.a && (
-					<Viewer
+					<ViewerLoader
 						id={search.a}
 						nav={listNav(search.a, items, loadMoreForViewer)}
 						onNavigate={(n) => setA(n.id, true)}
